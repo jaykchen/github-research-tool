@@ -6,11 +6,12 @@ use github_flows::{
     octocrab::{models::issues::Issue, Error as OctoError},
     GithubLogin,
 };
+use http_req::{request::Method, request::Request, response::Response, uri::Uri};
 use log;
-use http_req::{request::Method, request::Request, uri::Uri};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
+
 pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     #[derive(Debug, Deserialize)]
     struct GithubUser {
@@ -18,17 +19,20 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/contributors");
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/contributors",
+        owner, repo
+    );
     let mut contributors = Vec::new();
-    let mut next_url = Some(url.to_owned());
 
-    while let Some(url) = next_url {
-        match github_http_fetch_next(&github_token, &url).await {
+    let mut current_url = url.to_owned();
+    loop {
+        match github_http_fetch_next(&github_token, &current_url).await {
             None => {
                 log::error!("Error fetching contributors");
                 return None;
             }
-            Some((res, link)) => {
+            Some(res) => {
                 let new_contributors: Vec<GithubUser> = match serde_json::from_slice(&res) {
                     Ok(contributors) => contributors,
                     Err(err) => {
@@ -38,7 +42,39 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
                 };
 
                 contributors.extend(new_contributors.into_iter().map(|user| user.login));
-                next_url = link;
+
+                // Handle pagination
+                let response = Response::from_head(&res).unwrap();
+                let res_headers = response.headers();
+                let link_header = res_headers.get("Link");
+                match link_header {
+                    Some(header) => {
+                        let next_link_temp: Option<String> = header
+                            .as_str()
+                            .split(',')
+                            .filter_map(|link| {
+                                if link.contains("rel=\"next\"") {
+                                    link.split(';').next().map(|url| {
+                                        url.trim_matches(&[' ', '<', '>'] as &[char]).to_string()
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .next();
+
+                        let next_link = next_link_temp.as_deref();
+
+                        if let Some(link) = next_link {
+                            current_url = link.to_string();
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -46,7 +82,7 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     Some(contributors)
 }
 
-pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<(Vec<u8>, Option<String>)> {
+pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<Vec<u8>> {
     let url = Uri::try_from(url).unwrap();
     let mut writer = Vec::new();
 
@@ -54,7 +90,7 @@ pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<(Vec<u8>, 
         .method(Method::GET)
         .header("User-Agent", "flows-network connector")
         .header("Content-Type", "application/vnd.github.v3+json")
-        .header("Authorization", &format!("Bearer {}", token))
+        .header("Authorization", &format!("Bearer {token}"))
         .send(&mut writer)
     {
         Ok(res) => {
@@ -63,53 +99,15 @@ pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<(Vec<u8>, 
                 return None;
             };
 
-            // Parse the Link header for the link to the next page
-            let link_header = res.headers().get("Link").and_then(|header_value| Some(header_value.as_str()));
-            let next_link = link_header.and_then(|header| {
-                header.split(',').find_map(|link| {
-                    if link.contains("rel=\"next\"") {
-                        link.split(';').next().map(|url| url.trim_matches(&[' ', '<', '>'] as &[char]).to_owned())
-                    } else {
-                        None
-                    }
-                })
-            });
-
-            Some((writer, next_link))
+            return Some(writer);
         }
         Err(_e) => {
             log::error!("Error getting response from Github: {:?}", _e);
-            None
         }
     }
+
+    None
 }
-
-// pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
-//     #[derive(Debug, Deserialize)]
-//     struct GithubUser {
-//         login: String,
-//     }
-
-//     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-//     let url = format!("https://api.github.com/repos/{owner}/{repo}/contributors");
-//     match github_http_fetch(&github_token, &url).await {
-//         None => {
-//             log::error!("Error fetching contributors");
-//             None
-//         }
-//         Some(res) => {
-//             let contributors: Vec<GithubUser> = match serde_json::from_slice(&res) {
-//                 Ok(contributors) => contributors,
-//                 Err(err) => {
-//                     log::error!("Error parsing contributors: {:?}", err);
-//                     return None;
-//                 }
-//             };
-
-//             Some(contributors.into_iter().map(|user| user.login).collect())
-//         }
-//     }
-// }
 
 pub async fn get_issues(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
     #[derive(Debug, Deserialize)]
