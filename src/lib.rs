@@ -44,14 +44,21 @@ async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
     log::info!("language: {:?}", language.to_string());
     if sm.text.contains(&trigger_word) {
         if let Some(res) = get_user_repos(user_name, language).await {
-            log::info!("res: {:?}", res.clone());
             send_message_to_channel("ik8", "ch_in", res).await;
         }
 
         let search_query = user_name.to_string();
         if let Some(res) = search_mention(&search_query, Some("ISSUE")).await {
-            log::info!("res: {:?}", res.clone());
+            send_message_to_channel("ik8", "ch_in", res).await;
+        }
+        if let Some(res) = search_mention(&search_query, Some("Repository")).await {
             send_message_to_channel("ik8", "ch_mid", res).await;
+        }
+        if let Some(res) = search_mention(&search_query, Some("PULL_REQUEST")).await {
+            send_message_to_channel("ik8", "ch_out", res).await;
+        }
+        if let Some(res) = search_mention(&search_query, Some("DISCUSSION")).await {
+            send_message_to_channel("ik8", "ch_err", res).await;
         }
 
         if !save_user(user_name).await {
