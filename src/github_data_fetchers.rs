@@ -7,9 +7,109 @@ use github_flows::{
     GithubLogin,
 };
 use log;
+use http_req::{request::Method, request::Request, uri::Uri};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
+pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
+    #[derive(Debug, Deserialize)]
+    struct GithubUser {
+        login: String,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/contributors");
+    let mut contributors = Vec::new();
+    let mut next_url = Some(url.to_owned());
+
+    while let Some(url) = next_url {
+        match github_http_fetch_next(&github_token, &url).await {
+            None => {
+                log::error!("Error fetching contributors");
+                return None;
+            }
+            Some((res, link)) => {
+                let new_contributors: Vec<GithubUser> = match serde_json::from_slice(&res) {
+                    Ok(contributors) => contributors,
+                    Err(err) => {
+                        log::error!("Error parsing contributors: {:?}", err);
+                        return None;
+                    }
+                };
+
+                contributors.extend(new_contributors.into_iter().map(|user| user.login));
+                next_url = link;
+            }
+        }
+    }
+
+    Some(contributors)
+}
+
+pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<(Vec<u8>, Option<String>)> {
+    let url = Uri::try_from(url).unwrap();
+    let mut writer = Vec::new();
+
+    match Request::new(&url)
+        .method(Method::GET)
+        .header("User-Agent", "flows-network connector")
+        .header("Content-Type", "application/vnd.github.v3+json")
+        .header("Authorization", &format!("Bearer {}", token))
+        .send(&mut writer)
+    {
+        Ok(res) => {
+            if !res.status_code().is_success() {
+                log::error!("Github http error {:?}", res.status_code());
+                return None;
+            };
+
+            // Parse the Link header for the link to the next page
+            let link_header = res.headers().get("Link").and_then(|header_value| Some(header_value.as_str()));
+            let next_link = link_header.and_then(|header| {
+                header.split(',').find_map(|link| {
+                    if link.contains("rel=\"next\"") {
+                        link.split(';').next().map(|url| url.trim_matches(&[' ', '<', '>'] as &[char]).to_owned())
+                    } else {
+                        None
+                    }
+                })
+            });
+
+            Some((writer, next_link))
+        }
+        Err(_e) => {
+            log::error!("Error getting response from Github: {:?}", _e);
+            None
+        }
+    }
+}
+
+// pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
+//     #[derive(Debug, Deserialize)]
+//     struct GithubUser {
+//         login: String,
+//     }
+
+//     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+//     let url = format!("https://api.github.com/repos/{owner}/{repo}/contributors");
+//     match github_http_fetch(&github_token, &url).await {
+//         None => {
+//             log::error!("Error fetching contributors");
+//             None
+//         }
+//         Some(res) => {
+//             let contributors: Vec<GithubUser> = match serde_json::from_slice(&res) {
+//                 Ok(contributors) => contributors,
+//                 Err(err) => {
+//                     log::error!("Error parsing contributors: {:?}", err);
+//                     return None;
+//                 }
+//             };
+
+//             Some(contributors.into_iter().map(|user| user.login).collect())
+//         }
+//     }
+// }
 
 pub async fn get_issues(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
     #[derive(Debug, Deserialize)]
