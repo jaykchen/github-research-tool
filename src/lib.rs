@@ -197,6 +197,12 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             let client = bot.get_client();
             let channel_id = msg.channel_id;
             let content = msg.content;
+            let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
+                "content": "not getting anything"
+            }});
+            _ = client.send_message(channel_id.into(), &resp).await;
+            // _ = client.create_followup_message(&ac.token, &resp).await;
+
         }
     }
 }
