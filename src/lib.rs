@@ -112,7 +112,7 @@ async fn register_commands(discord_token: &str) {
     //         "https://discord.com/api/v8/applications/{}/guilds/{}/commands",
     //         bot_id, guild_id
     //     );
-    let commands = serde_json::json!([command_weather, command_get_user_repos]);
+    let commands = serde_json::json!([command_weather, command_save_user]);
     // let commands = vec![command_get_user_repos, command_search_mention, command_save_user];
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
