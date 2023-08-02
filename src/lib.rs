@@ -98,7 +98,7 @@ async fn register_commands(discord_token: &str) {
     //         "https://discord.com/api/v8/applications/{}/guilds/{}/commands",
     //         bot_id, guild_id
     //     );
-// let commands = vec![command_get_user_repos, command_search_mention, command_save_user];
+    // let commands = vec![command_get_user_repos, command_search_mention, command_save_user];
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
@@ -122,7 +122,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     "type": 5,  // type 5 indicates that the bot has received the command and is processing it
                 }
             );
-            _ = client.create_interaction_response(ac.id.0, &ac.token, &initial_response).await;
+            _ = client
+                .create_interaction_response(ac.id.0, &ac.token, &initial_response)
+                .await;
 
             match ac.data.name.as_str() {
                 "get_user_repos" => {
@@ -154,10 +156,11 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     let resp = serde_json::json!(
                         {
+                            "type": 4,
                             "content": user_repos // Send the retrieved data
                         }
                     );
-                    _ = client.send_message(*channel_id, &resp).await;
+                    _ = client.create_followup_message(&ac.token, &resp).await;
                 }
                 _ => {}
             }
