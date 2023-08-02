@@ -127,6 +127,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
                 .await;
 
+            let mut resp: serde_json::Value = serde_json::json!({});
+
             match ac.data.name.as_str() {
                 "get_user_repos" => {
                     let options = &ac.data.options;
@@ -155,14 +157,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     let user_repos = get_user_repos(username, language).await;
 
-                    let resp = serde_json::json!({
+                    resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source
                         "data": {
                             "content": user_repos
                         }
                     });
                     _ = client.send_message(*channel_id, &resp).await;
-                    _ = client.create_followup_message(&ac.token, &resp).await;
                 }
                 _ => {
                     let default_resp = serde_json::json!({
@@ -176,6 +177,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await;
                 }
             }
+            _ = client.create_followup_message(&ac.token, &resp).await;
         }
         EventModel::Message(msg) => {
             let client = bot.get_client();
