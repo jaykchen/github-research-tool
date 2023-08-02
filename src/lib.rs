@@ -120,8 +120,10 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
             let initial_response = serde_json::json!(
                 {
-                    "type": 5,  // type 5 indicates that the bot has received the command and is processing it
-                }
+                    "type": 4,
+                    "data": {
+                        "content": "Bot is pulling data for you, please wait."
+                    }                }
             );
             _ = client
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
@@ -177,7 +179,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await;
                 }
             }
-            _ = client.edit_original_interaction_response(&ac.token, &resp).await;
+            _ = client
+                .edit_original_interaction_response(&ac.token, &resp)
+                .await;
             // _ = client.create_followup_message(&ac.token, &resp).await;
         }
         EventModel::Message(msg) => {
