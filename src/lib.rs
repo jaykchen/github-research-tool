@@ -123,7 +123,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     "type": 4,
                     "data": {
                         "content": "Bot is pulling data for you, please wait."
-                    }                }
+                    }
+                   }
             );
             _ = client
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
@@ -165,7 +166,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": user_repos
                         }
                     });
-                    _ = client.send_message(*channel_id, &resp).await;
+                    _ = client.create_followup_message(&ac.token, &resp).await;
+                    // _ = client.send_message(*channel_id, &resp).await;
                 }
                 _ => {
                     let default_resp = serde_json::json!({
