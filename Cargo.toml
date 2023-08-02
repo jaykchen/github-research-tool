@@ -16,10 +16,22 @@ openai-flows = "0.8.5"
 tokio_wasi = { version = "1.25.1", features = ["macros", "rt"] }
 anyhow = "1"
 serde_json = "1"
-http_req_wasi = {version = "0.10", features = ["wasmedge_ssl"]}
+http_req_wasi = {version = "0.10", features = ["wasmedge_ssl"]} 
+# http_req_wasi = { version = "0.11.1", features = ["wasmedge_rustls", "wasmedge_rustls_api"] }
+
 github-flows = "0.5.2"
 urlencoding = "2.1.3"
 flowsnet-platform-sdk = "0.1.5"
 log = "0.4.19"
 store-flows = "0.3.1"
 discord-flows = "0.5.1"
+
+# [dependencies.http_req_wasi]
+# version = "0.11.1"
+#  features = ["wasmedge_rustls", "wasmedge_rustls_api"] 
+
+# [dependencies.octocrab_wasi]
+# version = "0.18.5"
+# features = ["wasi"]
+# default-features = false
+# package = "octocrab_wasi"

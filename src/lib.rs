@@ -177,7 +177,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await;
                 }
             }
-            _ = client.create_followup_message(&ac.token, &resp).await;
+            _ = client.edit_original_interaction_response(&ac.token, &resp).await;
+            // _ = client.create_followup_message(&ac.token, &resp).await;
         }
         EventModel::Message(msg) => {
             let client = bot.get_client();
