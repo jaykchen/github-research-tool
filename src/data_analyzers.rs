@@ -103,11 +103,10 @@ pub async fn correlate_commits_issues(
     .await
 }
 pub async fn correlate_user_and_this(_user_data: &str, _own_summary: &str) -> Option<String> {
-
     let sys_prompt_1 = &format!("Your task is to analyze the Github user's activity data, which includes the most active repositories, languages used, commit count, and issue interactions on our repo. Identify any correlations between the programming languages used in the user's activities and the languages required by our project. Pay close attention to any relationships between the user's activity in their own repositories, the languages they use, and their interactions in our repo. Use this data to evaluate the user's expertise and their potential contribution to our project. Provide a concise summary in bullet-point format.");
 
     let usr_prompt_1 = &format!("Given the user's most active repositories data: {_user_data}, the languages used, the commit count, and the interactions on our repo: {_own_summary}, analyze the user's activity and identify patterns or preferences that align with our project's requirements. Consider the repositories they're most active in, the languages they use, especially those relevant to our project, and how their interactions in our repo might reflect their understanding and proficiency in these languages. Additionally, note any instances where the user's own repositories or preferred languages directly intersect with the needs of our project.");
-    
+
     let usr_prompt_2 = &format!("Based on the analyzed Github user activity data, create a concise bullet-point summary. Highlight the user's main areas of interest, their preferred languages, especially those relevant to our project, and their most impactful interactions on our repo. Detail how their skills and expertise in these languages could potentially benefit our project. Emphasize any correlation between their personal Github activity, their understanding of required languages, and their interactions in our repo. Avoid replicating phrases from the raw data and focus on providing a unique and insightful narrative. Make sure your answer stays below 256 tokens.");
 
     chain_of_chat(

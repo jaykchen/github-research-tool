@@ -70,7 +70,7 @@ async fn register_commands(discord_token: &str) {
                 "required": true
             },
             {
-                "name": "type",
+                "name": "search_type",
                 "description": "The type to search mentions in (e.g., ISSUE)",
                 "type": 3, // String type according to Discord's API
                 "required": true
@@ -123,13 +123,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             let channel_id = ac.channel_id.as_u64();
 
             let initial_response = serde_json::json!(
-                {
-                    "type": 4,
-                    "data": {
-                        "content": "Bot is pulling data for you, please wait."
-                    }
-                   }
-            );
+                    {
+            "type": 4,
+            "data": {
+                "content": "Bot is pulling data for you, please wait."
+            }
+            }
+                );
             _ = client
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
                 .await;
@@ -137,8 +137,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
                 "content": "not getting anything"
             }});
-            _ = client.send_message(*channel_id, &resp).await;
-            // _ = client.create_followup_message(&ac.token, &resp).await;
 
             match ac.data.name.as_str() {
                 "save_user" => {
@@ -161,12 +159,10 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .unwrap_or(serde_json::json!({}))
                         .to_string();
 
-                    let resp = serde_json::json!(
-                        {
-                            "content": usernames
-                        }
-                    );
-                    _ = client.send_message(*channel_id, &resp).await;
+                    resp = serde_json::json!({"type": 4, "data": {
+                        "content": usernames
+                    }});
+                    // _ = client.send_message(*channel_id, &resp).await;
                 }
                 "get_user_repos" => {
                     let options = &ac.data.options;
@@ -193,36 +189,57 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for language"),
                     };
 
-                    let text = format!("Bot is pulling data for {}, on {}.", username, language);
-                    log::info!("{}", text);
-
                     let user_repos = get_user_repos(username, language).await.unwrap_or_default();
 
                     resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source
                         "data": {
-                            "content": user_repos
+                            "content": user_repos.to_string()
                         }
                     });
-                    _ = client.send_message(*channel_id, &resp).await;
-
-                    _ = client.create_followup_message(&ac.token, &resp).await;
                     // _ = client.send_message(*channel_id, &resp).await;
                 }
-                _ => {
-                    let default_resp = serde_json::json!({
-                        "type": 4,
+                "search_mention" => {
+                    let options = &ac.data.options;
+
+                    let search_query = match options
+                        .get(0)
+                        .expect("Expected search_query option")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected search_query object")
+                    {
+                        CommandDataOptionValue::String(s) => s,
+                        _ => panic!("Expected string for search_query"),
+                    };
+
+                    let search_type = match options
+                        .get(1)
+                        .expect("Expected search_type option")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected search_type object")
+                    {
+                        CommandDataOptionValue::String(s) => s,
+                        _ => panic!("Expected string for search_type"),
+                    };
+
+                    let search_result = search_mention(search_query, Some(search_type))
+                        .await
+                        .unwrap_or_default();
+
+                    resp = serde_json::json!({
+                        "type": 4, // type 4 is for Channel Message With Source
                         "data": {
-                            "content": "Unknown command."
+                            "content": search_result.to_string()
                         }
                     });
-                    _ = client
-                        .create_followup_message(&ac.token, &default_resp)
-                        .await;
+                    // _ = client.send_message(*channel_id, &resp).await;
                 }
+                _ => {}
             }
 
-            _ = client.create_followup_message(&ac.token, &resp).await;
+            _ = client.send_message(*channel_id, &resp).await;
         }
         EventModel::Message(msg) => {
             let client = bot.get_client();
