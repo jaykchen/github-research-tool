@@ -40,19 +40,6 @@ pub async fn run() {
 }
 
 async fn register_commands(discord_token: &str) {
-    let command_weather = serde_json::json!({
-        "name": "weather",
-        "description": "Get the weather for a city",
-        "options": [
-            {
-                "name": "city",
-                "description": "The city to lookup",
-                "type": 3,
-                "required": true
-            }
-        ]
-    });
-
     let command_get_user_repos = serde_json::json!({
         "name": "get_user_repos",
         "description": "Get user's top repos by programming lanugage",
@@ -112,8 +99,11 @@ async fn register_commands(discord_token: &str) {
     //         "https://discord.com/api/v8/applications/{}/guilds/{}/commands",
     //         bot_id, guild_id
     //     );
-    let commands = serde_json::json!([command_weather, command_save_user]);
-    // let commands = vec![command_get_user_repos, command_search_mention, command_save_user];
+    let commands = serde_json::json!([
+        command_get_user_repos,
+        command_save_user,
+        command_search_mention,
+    ]);
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
@@ -151,46 +141,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             // _ = client.create_followup_message(&ac.token, &resp).await;
 
             match ac.data.name.as_str() {
-                "weather" => {
-                    let options = ac
-                        .data
-                        .options
-                        .get(0)
-                        .expect("Expected city option")
-                        .resolved
-                        .as_ref()
-                        .expect("Expected city object");
-
-                    let city = match options {
-                        CommandDataOptionValue::String(s) => s,
-                        _ => panic!("Expected string for city"),
-                    };
-
-                    let resp_inner = match get_weather(&city) {
-                        Some(w) => format!(
-                            r#"Today: {},
-                Low temperature: {} °C,
-                High temperature: {} °C,
-                Wind Speed: {} km/h"#,
-                            w.weather
-                                .first()
-                                .unwrap_or(&Weather {
-                                    main: "Unknown".to_string()
-                                })
-                                .main,
-                            w.main.temp_min as i32,
-                            w.main.temp_max as i32,
-                            w.wind.speed as i32
-                        ),
-                        None => String::from("No city or incorrect spelling"),
-                    };
-                    let resp = serde_json::json!(
-                        {
-                            "content": resp_inner
-                        }
-                    );
-                    _ = client.send_message(*channel_id, &resp).await;
-                }
                 "save_user" => {
                     let options = ac
                         .data
@@ -207,7 +157,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     };
                     save_user(username).await;
 
-                    let usernames = get("usernames").unwrap_or(serde_json::json!({})).to_string();
+                    let usernames = get("usernames")
+                        .unwrap_or(serde_json::json!({}))
+                        .to_string();
 
                     let resp = serde_json::json!(
                         {
@@ -283,57 +235,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             // _ = client.create_followup_message(&ac.token, &resp).await;
         }
     }
-}
-
-#[derive(Deserialize, Debug)]
-struct ApiResult {
-    weather: Vec<Weather>,
-    main: Main,
-    wind: Wind,
-}
-
-#[derive(Deserialize, Debug)]
-struct Weather {
-    main: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct Main {
-    temp_max: f64,
-    temp_min: f64,
-}
-
-#[derive(Deserialize, Debug)]
-struct Wind {
-    speed: f64,
-}
-
-fn get_weather(city: &str) -> Option<ApiResult> {
-    let mut writer = Vec::new();
-    let api_key = env::var("API_KEY").unwrap_or("fake_api_key".to_string());
-    let query_str = format!(
-        "https://api.openweathermap.org/data/2.5/weather?q={city}&units=metric&appid={api_key}"
-    );
-
-    let uri = Uri::try_from(query_str.as_str()).unwrap();
-    match Request::new(&uri).method(Method::GET).send(&mut writer) {
-        Err(_e) => log::error!("Error getting response from weather api: {:?}", _e),
-
-        Ok(res) => {
-            if !res.status_code().is_success() {
-                log::error!("weather api http error: {:?}", res.status_code());
-                return None;
-            }
-            match serde_json::from_slice::<ApiResult>(&writer) {
-                Err(_e) => log::error!("Error deserializing weather api response: {:?}", _e),
-                Ok(w) => {
-                    log::info!("Weather: {:?}", w);
-                    return Some(w);
-                }
-            }
-        }
-    };
-    None
 }
 
 // async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
