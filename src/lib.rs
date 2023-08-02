@@ -162,7 +162,17 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     );
                     _ = client.create_followup_message(&ac.token, &resp).await;
                 }
-                _ => {}
+                _ => {
+                    let default_resp = serde_json::json!({
+                        "type": 4,
+                        "data": {
+                            "content": "Unknown command."
+                        }
+                    });
+                    _ = client
+                        .create_followup_message(&ac.token, &default_resp)
+                        .await;
+                }
             }
         }
         EventModel::Message(msg) => {
