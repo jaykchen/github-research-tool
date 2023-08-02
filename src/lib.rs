@@ -116,6 +116,14 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
         EventModel::ApplicationCommand(ac) => {
             let client = bot.get_client();
             let channel_id = ac.channel_id.as_u64();
+
+            let initial_response = serde_json::json!(
+                {
+                    "type": 5,  // type 5 indicates that the bot has received the command and is processing it
+                }
+            );
+            _ = client.create_interaction_response(ac.id.0, &ac.token, &initial_response).await;
+
             match ac.data.name.as_str() {
                 "get_user_repos" => {
                     let options = &ac.data.options;
