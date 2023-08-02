@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json;
 use slack_flows::send_message_to_channel;
 use std::env;
+use store_flows::{get, set};
 use utils::*;
 
 #[no_mangle]
@@ -26,15 +27,14 @@ pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    let commands_registered = env::var("COMMANDS_REGISTERED").unwrap_or("false".to_string());
+    let mut commands_registered = false;
+    // let commands_registered = env::var("COMMANDS_REGISTERED").unwrap_or("false".to_string());
 
-    match commands_registered.as_str() {
-        "false" => {
-            register_commands(&discord_token).await;
-            env::set_var("COMMANDS_REGISTERED", "true");
-        }
-        _ => {}
+    if !commands_registered {
+        register_commands(&discord_token).await;
+        commands_registered = true;
     }
+
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
 }
@@ -187,6 +187,31 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     let resp = serde_json::json!(
                         {
                             "content": resp_inner
+                        }
+                    );
+                    _ = client.send_message(*channel_id, &resp).await;
+                }
+                "save_user" => {
+                    let options = ac
+                        .data
+                        .options
+                        .get(0)
+                        .expect("Expected username")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected username object");
+
+                    let username = match options {
+                        CommandDataOptionValue::String(s) => s,
+                        _ => panic!("Expected string for username"),
+                    };
+                    save_user(username).await;
+
+                    let usernames = get("usernames").unwrap_or(serde_json::json!({})).to_string();
+
+                    let resp = serde_json::json!(
+                        {
+                            "content": usernames
                         }
                     );
                     _ = client.send_message(*channel_id, &resp).await;
