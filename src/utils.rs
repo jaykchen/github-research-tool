@@ -212,7 +212,7 @@ pub async fn save_user(username: &str) -> bool {
             Err(_) => HashSet::new(), // invalid or absent "usernames" field in store
         },
         None => HashSet::new(), // no "usernames" field in store
-    };
+    };    
 
     // Check if the username already exists
     if existing_users.contains(username) {
