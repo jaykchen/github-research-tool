@@ -158,6 +158,12 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for language"),
                     };
 
+                    let text = format!("Bot is pulling data for {username}, on {language}.");
+                    log::info!("{}", text);
+                    _ = client
+                        .edit_original_interaction_response(&ac.token, &serde_json::json!(text))
+                        .await;
+
                     let user_repos = get_user_repos(username, language).await;
 
                     resp = serde_json::json!({
