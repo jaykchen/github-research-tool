@@ -155,14 +155,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     let user_repos = get_user_repos(username, language).await;
 
-                    let resp = serde_json::json!(
-                        {
-                            "type": 4,
-                            "content": user_repos // Send the retrieved data
+                    let resp = serde_json::json!({
+                        "type": 4, // type 4 is for Channel Message With Source
+                        "data": {
+                            "content": user_repos
                         }
-                    );
+                    });
                     _ = client.send_message(*channel_id, &resp).await;
-                    send_message_to_channel("ik8", "ch_err", resp.to_string()).await;
                     _ = client.create_followup_message(&ac.token, &resp).await;
                 }
                 _ => {
