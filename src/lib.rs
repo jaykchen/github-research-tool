@@ -16,6 +16,7 @@ use http_req::{
 };
 use serde::Deserialize;
 use serde_json;
+use slack_flows::send_message_to_channel;
 use std::env;
 use utils::*;
 
@@ -160,6 +161,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": user_repos // Send the retrieved data
                         }
                     );
+                    _ = client.send_message(*channel_id, &resp).await;
+                    send_message_to_channel("ik8", "ch_err", resp.to_string()).await;
                     _ = client.create_followup_message(&ac.token, &resp).await;
                 }
                 _ => {
