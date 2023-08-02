@@ -244,7 +244,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     let text = format!("Bot is pulling data for {}, on {}.", username, language);
                     log::info!("{}", text);
 
-                    let user_repos = get_user_repos(username, language).await;
+                    let user_repos = get_user_repos(username, language).await.unwrap_or_default();
 
                     resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source

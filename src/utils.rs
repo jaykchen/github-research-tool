@@ -178,32 +178,6 @@ pub async fn github_http_post(token: &str, base_url: &str, query: &str) -> Optio
     None
 }
 
-// pub async fn save_user(username: &str) -> bool {
-//     // Get the existing usernames
-//     let existing_users: HashSet<String> = match get("usernames") {
-//         Some(value) => match value.as_str() {
-//             Some(list) => serde_json::from_str(list).unwrap_or_else(|_| HashSet::new()),
-//             None => HashSet::new(), // invalid or absent "usernames" field in store
-//         },
-//         None => HashSet::new(), // no "usernames" field in store
-//     };
-
-//     // Check if the username already exists
-//     if existing_users.contains(&username.to_string()) {
-//         false // username already exists
-//     } else {
-//         // Save the new username
-//         let mut updated_users = existing_users.clone();
-//         updated_users.insert(username.to_string());
-//         set(
-//             "usernames",
-//             Value::String(serde_json::to_string(&updated_users).unwrap()),
-//             None,
-//         );
-//         true // username saved
-//     }
-// }
-
 pub async fn save_user(username: &str) -> bool {
     // Get the existing usernames
     let mut existing_users: HashSet<String> = get("usernames")
@@ -228,4 +202,3 @@ pub async fn save_user(username: &str) -> bool {
     // If the username was added, return true; otherwise, return false
     !already_exists
 }
-
