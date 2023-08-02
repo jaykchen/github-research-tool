@@ -98,13 +98,13 @@ async fn register_commands(discord_token: &str) {
     //         "https://discord.com/api/v8/applications/{}/guilds/{}/commands",
     //         bot_id, guild_id
     //     );
-
+// let commands = vec![command_get_user_repos, command_search_mention, command_save_user];
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
 
     match http_client
-        .create_guild_application_commands(guild_id, &command_get_user_repos)
+        .create_guild_application_command(guild_id, &command_get_user_repos)
         .await
     {
         Ok(_) => log::info!("Successfully registered command"),
