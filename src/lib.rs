@@ -120,7 +120,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
             let initial_response = serde_json::json!(
                 {
-                    "type": 5,
+                    "type": 4,
                     "data": {
                         "content": "Bot is pulling data for you, please wait."
                     }
@@ -130,7 +130,10 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
                 .await;
 
-            let mut resp: serde_json::Value = serde_json::json!({});
+            let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
+                "content": "not getting anything"
+            }});
+            _ = client.create_followup_message(&ac.token, &resp).await;
 
             match ac.data.name.as_str() {
                 "get_user_repos" => {
@@ -160,15 +163,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     let text = format!("Bot is pulling data for {}, on {}.", username, language);
                     log::info!("{}", text);
-                    _ = client
-                        .edit_original_interaction_response(
-                            &ac.token,
-                            &serde_json::json!({
-                                "content": text
-                            }),
-                        )
-                        .await;
-
 
                     let user_repos = get_user_repos(username, language).await;
 
@@ -194,7 +188,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 }
             }
 
-             _ = client.create_followup_message(&ac.token, &resp).await;
+            _ = client.create_followup_message(&ac.token, &resp).await;
         }
         EventModel::Message(msg) => {
             let client = bot.get_client();
