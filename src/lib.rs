@@ -117,18 +117,16 @@ async fn register_commands(discord_token: &str) {
     }
 }
 async fn handle<B: Bot>(bot: &B, em: EventModel) {
-    let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
+    let mut resp = serde_json::json!({"type": 4, "data": {
         "content": "not getting anything"
     }});
     let client = bot.get_client();
     // let channel_id = ac.channel_id.as_u64();
     let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
     let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
-    let mut interaction_id = 0;
     let mut interaction_token = String::from("");
     match em {
         EventModel::ApplicationCommand(ac) => {
-            interaction_id = ac.id.0;
             interaction_token = ac.token.clone();
 
             let initial_response = serde_json::json!(
@@ -235,7 +233,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     let search_result = search_mention(search_query, Some(search_type))
                         .await
-                        .unwrap_or_default();
+                        .unwrap_or("Couldn't find anything!".to_string());
 
                     resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source
@@ -249,20 +247,19 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             }
         }
         EventModel::Message(msg) => {
-            let client = bot.get_client();
-            let channel_id = msg.channel_id;
-            let content = msg.content;
-            let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
-                "content": "not getting anything"
+            resp = serde_json::json!({"type": 4, "data": {
+                "content": msg.content
             }});
-            _ = client.send_message(channel_id.into(), &resp).await;
-            // _ = client.create_followup_message(&ac.token, &resp).await;
         }
     }
     _ = client.send_message(channel_id, &resp).await;
-    _ = client
-        .create_interaction_response(interaction_id, &interaction_token, &resp)
-        .await;
+    match client
+        .create_followup_message(&interaction_token, &resp)
+        .await
+    {
+        Ok(_) => {}
+        Err(_e) => log::error!("error sending initial response: {:?}", _e),
+    }
 }
 
 // async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
