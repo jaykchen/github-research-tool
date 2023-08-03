@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
+
+
 pub async fn analyze_commits(owner: &str, repo: &str, user_name: &str) -> Option<String> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
@@ -102,6 +104,7 @@ pub async fn correlate_commits_issues(
     )
     .await
 }
+
 pub async fn correlate_user_and_this(_user_data: &str, _own_summary: &str) -> Option<String> {
     let sys_prompt_1 = &format!("Your task is to analyze the Github user's activity data, which includes the most active repositories, languages used, commit count, and issue interactions on our repo. Identify any correlations between the programming languages used in the user's activities and the languages required by our project. Pay close attention to any relationships between the user's activity in their own repositories, the languages they use, and their interactions in our repo. Use this data to evaluate the user's expertise and their potential contribution to our project. Provide a concise summary in bullet-point format.");
 

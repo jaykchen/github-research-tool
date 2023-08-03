@@ -11,6 +11,16 @@ use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
+use store_flows::{get, set};
+
+pub async fn is_new_contributor(user_name: &str) -> bool {
+    match get("usernames")
+        .and_then(|val| serde_json::from_value::<std::collections::HashSet<String>>(val).ok())
+    {
+        Some(set) => !set.contains(user_name),
+        None => true,
+    }
+}
 
 pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     #[derive(Debug, Deserialize)]
