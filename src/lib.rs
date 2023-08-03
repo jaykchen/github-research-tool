@@ -125,14 +125,16 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
     let client = bot.get_client();
     // let channel_id = ac.channel_id.as_u64();
     let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
+    let application_id = env::var("application_id").unwrap_or("1132483335906664599".to_string());
     let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
+    let application_id = application_id.parse::<u64>().unwrap_or(1132483335906664599);
     // let mut application_id: InteractionId = InteractionId(0);
     let mut interaction_token = String::from("");
     match em {
         EventModel::ApplicationCommand(ac) => {
             // application_id = ac.id;
             interaction_token = ac.token.clone();
-
+            client.set_application_id(1132483335906664599);
             let initial_response = serde_json::json!(
                     {
             "type": 4,
@@ -217,12 +219,12 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
                     // _ = client.send_message(*channel_id, &resp).await;
                     match client
-                    .create_followup_message(&interaction_token, &resp)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(_e) => log::error!("error sending get_user_repos message: {:?}", _e),
-                }
+                        .create_followup_message(&interaction_token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending get_user_repos message: {:?}", _e),
+                    }
                 }
                 "search_mention" => {
                     let options = &ac.data.options;
@@ -261,12 +263,12 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     });
                     // _ = client.send_message(*channel_id, &resp).await;
                     match client
-                    .create_followup_message(&interaction_token, &resp)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(_e) => log::error!("error sending search_mention message: {:?}", _e),
-                }
+                        .create_followup_message(&interaction_token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending search_mention message: {:?}", _e),
+                    }
                 }
                 _ => {}
             }
