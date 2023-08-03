@@ -4,7 +4,7 @@ pub mod utils;
 use data_analyzers::*;
 use discord_flows::{
     http::HttpBuilder,
-    model::{application_command::CommandDataOptionValue, guild},
+    model::{application_command::CommandDataOptionValue, channel, guild, interaction},
     Bot, EventModel, ProvidedBot,
 };
 use dotenv::dotenv;
@@ -117,10 +117,19 @@ async fn register_commands(discord_token: &str) {
     }
 }
 async fn handle<B: Bot>(bot: &B, em: EventModel) {
+    let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
+        "content": "not getting anything"
+    }});
+    let client = bot.get_client();
+    // let channel_id = ac.channel_id.as_u64();
+    let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
+    let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
+    let mut interaction_id = 0;
+    let mut interaction_token = String::from("");
     match em {
         EventModel::ApplicationCommand(ac) => {
-            let client = bot.get_client();
-            let channel_id = ac.channel_id.as_u64();
+            interaction_id = ac.id.0;
+            interaction_token = ac.token.clone();
 
             let initial_response = serde_json::json!(
                     {
@@ -133,10 +142,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             _ = client
                 .create_interaction_response(ac.id.0, &ac.token, &initial_response)
                 .await;
-
-            let mut resp: serde_json::Value = serde_json::json!({"type": 4, "data": {
-                "content": "not getting anything"
-            }});
 
             match ac.data.name.as_str() {
                 "save_user" => {
@@ -189,7 +194,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for language"),
                     };
 
-                    let user_repos = get_user_repos(username, language).await.unwrap_or_default();
+                    let user_repos = get_user_repos(username, language)
+                        .await
+                        .unwrap_or("Couldn't get any repos!".to_string());
 
                     resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source
@@ -197,6 +204,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": user_repos.to_string()
                         }
                     });
+                    send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
+
                     // _ = client.send_message(*channel_id, &resp).await;
                 }
                 "search_mention" => {
@@ -238,8 +247,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 }
                 _ => {}
             }
-
-            _ = client.send_message(*channel_id, &resp).await;
         }
         EventModel::Message(msg) => {
             let client = bot.get_client();
@@ -252,6 +259,10 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             // _ = client.create_followup_message(&ac.token, &resp).await;
         }
     }
+    _ = client.send_message(channel_id, &resp).await;
+    _ = client
+        .create_interaction_response(interaction_id, &interaction_token, &resp)
+        .await;
 }
 
 // async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
