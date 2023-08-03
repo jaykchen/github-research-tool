@@ -4,7 +4,9 @@ pub mod utils;
 use data_analyzers::*;
 use discord_flows::{
     http::HttpBuilder,
-    model::{application_command::CommandDataOptionValue, channel, guild, interaction},
+    model::{
+        application_command::CommandDataOptionValue, channel, guild, interaction, Interaction,
+    },
     Bot, EventModel, ProvidedBot,
 };
 use dotenv::dotenv;
@@ -124,9 +126,11 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
     // let channel_id = ac.channel_id.as_u64();
     let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
     let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
+    // let mut application_id: InteractionId = InteractionId(0);
     let mut interaction_token = String::from("");
     match em {
         EventModel::ApplicationCommand(ac) => {
+            // application_id = ac.id;
             interaction_token = ac.token.clone();
 
             let initial_response = serde_json::json!(
@@ -166,6 +170,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         "content": usernames
                     }});
                     // _ = client.send_message(*channel_id, &resp).await;
+                    match client
+                        .create_followup_message(&interaction_token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending save_user message: {:?}", _e),
+                    }
                 }
                 "get_user_repos" => {
                     let options = &ac.data.options;
@@ -202,9 +213,16 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": user_repos.to_string()
                         }
                     });
-                    send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
+                    // send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
 
                     // _ = client.send_message(*channel_id, &resp).await;
+                    match client
+                    .create_followup_message(&interaction_token, &resp)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_e) => log::error!("error sending get_user_repos message: {:?}", _e),
+                }
                 }
                 "search_mention" => {
                     let options = &ac.data.options;
@@ -242,6 +260,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         }
                     });
                     // _ = client.send_message(*channel_id, &resp).await;
+                    match client
+                    .create_followup_message(&interaction_token, &resp)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_e) => log::error!("error sending search_mention message: {:?}", _e),
+                }
                 }
                 _ => {}
             }
@@ -253,13 +278,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
         }
     }
     _ = client.send_message(channel_id, &resp).await;
-    match client
-        .create_followup_message(&interaction_token, &resp)
-        .await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending initial response: {:?}", _e),
-    }
 }
 
 // async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
