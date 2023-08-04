@@ -165,9 +165,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .to_string();
                     send_message_to_channel("ik8", "ch_in", usernames.to_string()).await;
 
-                    resp = serde_json::json!({"type": 4, "data": {
+                    resp = serde_json::json!({
                         "content": usernames
-                    }});
+                    });
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)
                         .await
@@ -206,10 +206,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .unwrap_or("Couldn't get any repos!".to_string());
 
                     resp = serde_json::json!({
-                        "type": 4, // type 4 is for Channel Message With Source
-                        "data": {
-                            "content": user_repos.to_string()
-                        }
+                        "content": user_repos.to_string()
                     });
                     send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
 
@@ -252,10 +249,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     send_message_to_channel("ik8", "ch_in", search_result.to_string()).await;
 
                     resp = serde_json::json!({
-                        "type": 4, // type 4 is for Channel Message With Source
-                        "data": {
-                            "content": search_result.to_string()
-                        }
+                        "content": search_result.to_string()
                     });
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)
