@@ -31,18 +31,26 @@ pub async fn run() {
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
     let mut commands_registered = false;
-    // let commands_registered = env::var("COMMANDS_REGISTERED").unwrap_or("false".to_string());
+
+    match get("gh_bot_commands_registered") {
+        Some(s) => {
+            commands_registered = serde_json::from_value::<bool>(s).unwrap_or_else(|_| false);
+        }
+        None => {}
+    }
 
     if !commands_registered {
-        register_commands(&discord_token).await;
-        commands_registered = true;
+        match register_commands(&discord_token).await {
+            false => set("gh_bot_commands_registered", serde_json::json!(false), None),
+            true => set("gh_bot_commands_registered", serde_json::json!(true), None),
+        };
     }
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
 }
 
-async fn register_commands(discord_token: &str) {
+async fn register_commands(discord_token: &str) -> bool {
     let command_get_user_repos = serde_json::json!({
         "name": "get_user_repos",
         "description": "Get user's top repos by programming lanugage",
@@ -110,8 +118,14 @@ async fn register_commands(discord_token: &str) {
         .create_guild_application_commands(guild_id, &commands)
         .await
     {
-        Ok(_) => log::info!("Successfully registered command"),
-        Err(err) => log::error!("Error registering command: {}", err),
+        Ok(_) => {
+            log::info!("Successfully registered command");
+            true
+        }
+        Err(err) => {
+            log::error!("Error registering command: {}", err);
+            false
+        }
     }
 }
 async fn handle<B: Bot>(bot: &B, em: EventModel) {
@@ -119,18 +133,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
         "content": "not getting anything"
     }});
     let client = bot.get_client();
-    // let channel_id = ac.channel_id.as_u64();
-    // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
-    // let application_id = env::var("application_id").unwrap_or("1132483335906664599".to_string());
-    // let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
-    // let application_id = application_id.parse::<u64>().unwrap_or(1132483335906664599);
-    // let mut application_id: InteractionId = InteractionId(0);
-    // let mut interaction_token = String::from("");
+
     match em {
         EventModel::ApplicationCommand(ac) => {
-            // application_id = ac.id;
-            // interaction_token = ac.token.clone();
-            // client.set_application_id(1132483335906664599);
             let initial_response = serde_json::json!(
                     {
             "type": 4,
@@ -243,9 +248,23 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for search_type"),
                     };
 
-                    let search_result = search_issue(search_query)
-                        .await
-                        .unwrap_or("Couldn't find anything!".to_string());
+                    let mut search_result = "".to_string();
+                    match search_type.to_lowercase().as_str() {
+                        "issue" => {
+                            search_result =
+                                search_issue(search_query).await.unwrap_or("".to_string())
+                        }
+                        "repository" => {
+                            search_result =
+                                search_issue(search_query).await.unwrap_or("".to_string())
+                        }
+                        "discussion" => {
+                            search_result =
+                                search_issue(search_query).await.unwrap_or("".to_string())
+                        }
+                        _ => unreachable!("invalid search_type"),
+                    }
+
                     send_message_to_channel("ik8", "ch_in", search_result.to_string()).await;
 
                     resp = serde_json::json!({
