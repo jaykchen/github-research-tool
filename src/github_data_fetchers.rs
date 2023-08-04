@@ -1,4 +1,5 @@
 use crate::utils::*;
+use chrono::{DateTime, Utc};
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_flows::{
@@ -21,7 +22,29 @@ pub async fn is_new_contributor(user_name: &str) -> bool {
         None => true,
     }
 }
+pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
+    match get_contributors(owner, repo).await {
+        None => (false, 0_u16),
 
+        Some(contributors) => {
+            set(
+                "contributors",
+                serde_json::to_value(contributors).unwrap_or_default(),
+                None,
+            );
+
+            match get("contributors").and_then(|val| {
+                serde_json::from_value::<std::collections::HashSet<String>>(val).ok()
+            }) {
+                Some(set) => (true, set.len() as u16),
+                None => {
+                    log::error!("Error verifying contributors data in store");
+                    (false, 0_u16)
+                }
+            }
+        }
+    }
+}
 pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     #[derive(Debug, Deserialize)]
     struct GithubUser {
@@ -37,13 +60,27 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
 
     let mut current_url = url.to_owned();
     loop {
-        match github_http_fetch_next(&github_token, &current_url).await {
-            None => {
-                log::error!("Error fetching contributors");
+        let response_result: Result<(Response, Vec<u8>), Box<dyn std::error::Error>> =
+            github_fetch_with_header(&github_token, &current_url);
+        match response_result {
+            Err(e) => {
+                log::error!(
+                    "Error getting response for request to get contributors: {:?}",
+                    e
+                );
                 return None;
             }
-            Some(res) => {
-                let new_contributors: Vec<GithubUser> = match serde_json::from_slice(&res) {
+            Ok((res, body)) => {
+                let status = res.status_code(); // Check the status code
+                if !status.is_success() {
+                    log::error!(
+                        "Request to get contributors, unexpected status code: {:?}",
+                        status
+                    );
+                    return None;
+                }
+
+                let new_contributors: Vec<GithubUser> = match serde_json::from_slice(body.as_slice()) {
                     Ok(contributors) => contributors,
                     Err(err) => {
                         log::error!("Error parsing contributors: {:?}", err);
@@ -54,8 +91,7 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
                 contributors.extend(new_contributors.into_iter().map(|user| user.login));
 
                 // Handle pagination
-                let response = Response::from_head(&res).unwrap();
-                let res_headers = response.headers();
+                let res_headers = res.headers();
                 let link_header = res_headers.get("Link");
                 match link_header {
                     Some(header) => {
@@ -90,33 +126,6 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     }
 
     Some(contributors)
-}
-
-pub async fn github_http_fetch_next(token: &str, url: &str) -> Option<Vec<u8>> {
-    let url = Uri::try_from(url).unwrap();
-    let mut writer = Vec::new();
-
-    match Request::new(&url)
-        .method(Method::GET)
-        .header("User-Agent", "flows-network connector")
-        .header("Content-Type", "application/vnd.github.v3+json")
-        .header("Authorization", &format!("Bearer {token}"))
-        .send(&mut writer)
-    {
-        Ok(res) => {
-            if !res.status_code().is_success() {
-                log::error!("Github http error {:?}", res.status_code());
-                return None;
-            };
-
-            return Some(writer);
-        }
-        Err(_e) => {
-            log::error!("Error getting response from Github: {:?}", _e);
-        }
-    }
-
-    None
 }
 
 pub async fn get_issues(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
@@ -168,167 +177,6 @@ pub async fn get_issues(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue
     Some(out)
 }
 
-/*
-pub fn get_metrics(owner: &str, repo: &str) -> Option<String> {
-    let octocrab = get_octo(&GithubLogin::Default);
-
-    let metrics = octocrab
-        .repos(owner, repo)
-        .get_community_profile_metrics()
-        .await;
-
-    match metrics {
-        Ok(page) => {
-            let description = page.description.as_ref().unwrap();
-            let documentation = page.documentation.as_ref().unwrap();
-            let files = page
-                .files
-                .into_iter()
-                .map(|(key, val)| val.map(|f| f.name).collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-
-            log::error!("Github http error {:?}", res.status_code());
-            return None;
-
-            return Some(writer);
-        }
-        Err(_e) => {
-            log::error!("Error getting response from Github: {:?}", _e);
-        }
-    }
-}
-
-pub fn get_user_profile(owner: &str, repo: &str) -> Option<String> {
-    let octocrab = get_octo(&GithubLogin::Default);
-
-    let metrics = octocrab
-        .repos(owner, repo)
-        .get_community_profile_metrics()
-        .await;
-
-    match metrics {
-        Ok(page) => {
-            let description = page.description.as_ref().unwrap();
-            let documentation = page.documentation.as_ref().unwrap();
-            let files = page
-                .files
-                .into_iter()
-                .map(|(key, val)| val.map(|f| f.name).collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-
-            log::error!("Github http error {:?}", res.status_code());
-            return None;
-
-            return Some(writer);
-        }
-        Err(_e) => {
-            log::error!("Error getting response from Github: {:?}", _e);
-        }
-    }
-
-
-}
- */
-
-pub async fn search_mention(search_query: &str, search_type: Option<&str>) -> Option<String> {
-    #[derive(Debug, Deserialize)]
-    struct Root {
-        data: Data,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Data {
-        search: Search,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Search {
-        edges: Vec<Edge>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Edge {
-        node: Node,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Node {
-        title: Option<String>,
-        url: String,
-        createdAt: String,
-    }
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-
-    let types = if let Some(search_type) = search_type {
-        let upper = search_type.to_uppercase();
-        let title_case = match upper.as_str() {
-            "REPOSITORY" => "Repository",
-            "ISSUE" => "Issue",
-            "PULL_REQUEST" => "Pull_Request",
-            "DISCUSSION" => "Discussion",
-            _ => unreachable!("Invalid search type"),
-        }
-        .to_string();
-        vec![(upper, title_case)]
-    } else {
-        vec![
-            ("REPOSITORY".to_string(), "Repository".to_string()),
-            ("ISSUE".to_string(), "Issue".to_string()),
-            ("PULL_REQUEST".to_string(), "Pull_Request".to_string()),
-            ("DISCUSSION".to_string(), "Discussion".to_string()),
-        ]
-    };
-
-    let base_url = "https://api.github.com/graphql";
-    let mut out = String::new();
-
-    for search_type in &types {
-        let query = format!(
-            r#"
-            query {{
-                search(query: "{}", type: {}, first: 100) {{
-                    edges {{
-                        node {{
-                            ... on {} {{
-                                title
-                                url
-                                createdAt
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-            "#,
-            search_query, search_type.0, search_type.1
-        );
-
-        match github_http_post(&github_token, base_url, &query).await {
-            None => log::error!("Failed to send the request to {}", base_url.to_string()),
-            Some(response) => match serde_json::from_slice::<Root>(response.as_slice()) {
-                Err(e) => log::error!("Failed to parse the response: {}", e),
-                Ok(results) => {
-                    log::info!(
-                        "Found {} {}",
-                        results.data.search.edges.len(),
-                        search_type.1
-                    );
-                    for edge in results.data.search.edges {
-                        let temp = format!(
-                            "Type: {}, Title: {}, Url: {}, Created At: {}",
-                            search_type.1,
-                            edge.node.title.unwrap_or_default(),
-                            edge.node.url,
-                            edge.node.createdAt
-                        );
-                        out.push_str(&temp);
-                    }
-                }
-            },
-        };
-    }
-
-    Some(out)
-}
 pub async fn get_user_repos(user_name: &str, language: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
     struct Root {
@@ -422,7 +270,7 @@ pub async fn get_user_repos(user_name: &str, language: &str) -> Option<String> {
                     out.push_str(&temp);
                 }
 
-                println!("Found {} repositories", repos.data.search.nodes.len());
+                log::info!("Found {} repositories", repos.data.search.nodes.len());
             }
         },
     };
@@ -524,5 +372,278 @@ pub async fn get_user_repos_octo(user_name: &str, language: &str) -> Option<Stri
             log::error!("Found {} repositories", response.data.search.nodes.len());
         }
     };
+    Some(out)
+}
+
+pub async fn search_issue(search_query: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct Issue {
+        title: Option<String>,
+        url: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct IssueNode {
+        node: Option<Issue>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct IssueEdge {
+        edges: Vec<IssueNode>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct IssueSearch {
+        search: IssueEdge,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct IssueRoot {
+        data: IssueSearch,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("ISSUES \n");
+
+    let query = format!(
+        r#"
+        query {{
+            search(query: "{search_query}", type: ISSUE, first: 100) {{
+                edges {{
+                    node {{
+                        ... on Issue {{
+                            title
+                            url
+                            createdAt
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        "#
+    );
+
+    match github_http_post(&github_token, base_url, &query).await {
+        None => log::error!("Failed to send the request: {}", base_url),
+        Some(response) => match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
+            Err(e) => log::error!("Failed to parse the response: {}", e),
+            Ok(results) => {
+                for edge in results.data.search.edges {
+                    match edge.node {
+                        Some(issue) => {
+                            let date = match issue.createdAt {
+                                Some(date) => date.date_naive().to_string(),
+                                None => continue,
+                            };
+                            let temp = format!(
+                                "Title: {}, Url: {}, Created At: {}",
+                                issue.title.unwrap_or("".to_string()),
+                                issue.url.unwrap_or("".to_string()),
+                                date,
+                            );
+                            out.push_str(&temp);
+                        }
+                        None => continue,
+                    }
+                }
+            }
+        },
+    };
+
+    Some(out)
+}
+
+pub async fn search_repository(search_query: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct StarGazers {
+        totalCount: i32,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Repository {
+        name: Option<String>,
+        description: Option<String>,
+        url: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+        stargazers: Option<StarGazers>,
+        forkCount: Option<i32>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RepositoryNode {
+        node: Option<Repository>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RepositoryEdge {
+        edges: Vec<RepositoryNode>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RepositorySearch {
+        search: RepositoryEdge,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RepositoryRoot {
+        data: RepositorySearch,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("REPOSITORY \n");
+
+    let query = format!(
+        r#"query {{
+                search(query: "{search_query}", type: REPOSITORY, first: 100) {{
+                    edges {{
+                        node {{
+                            ... on Repository {{
+                                name
+                                description
+                                url
+                                createdAt
+                                stargazers {{
+                                  totalCount
+                                }}
+                                forkCount
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+            "#
+    );
+
+    match github_http_post(&github_token, base_url, &query).await {
+        None => log::error!(
+            "Failed to send the request to get RepositoryRoot: {}",
+            base_url
+        ),
+        Some(response) => match serde_json::from_slice::<RepositoryRoot>(response.as_slice()) {
+            Err(e) => log::error!("Failed to parse the responsefor RepositoryRoot: {}", e),
+            Ok(results) => {
+                for edge in results.data.search.edges {
+                    match edge.node {
+                        Some(repo) => {
+                            let date = match repo.createdAt {
+                                Some(date) => date.date_naive().to_string(),
+                                None => continue,
+                            };
+                            let stars = match repo.stargazers {
+                                Some(s) => s.totalCount,
+                                None => 0,
+                            };
+                            let forks = repo.forkCount.unwrap_or(0);
+                            let temp = format!(
+                                    "Name: {}, Description: {}, Url: {}, Created At: {}, Stars: {}, Forks: {}",
+                                    repo.name.unwrap_or("".to_string()),
+                                    repo.description.unwrap_or("".to_string()),
+                                    repo.url.unwrap_or("".to_string()),
+                                    date,
+                                    stars,
+                                    forks,
+                                );
+                            out.push_str(&temp);
+                        }
+                        None => continue,
+                    }
+                }
+            }
+        },
+    };
+
+    Some(out)
+}
+
+pub async fn search_discussion(search_query: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct Discussion {
+        title: Option<String>,
+        url: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+        upvoteCount: Option<i32>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionNode {
+        node: Option<Discussion>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionEdge {
+        edges: Vec<DiscussionNode>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionSearch {
+        search: DiscussionEdge,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionRoot {
+        data: DiscussionSearch,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("DISCUSSION: \n");
+
+    let query = format!(
+        r#"
+        query {{
+            search(query: "{search_query}", type: DISCUSSION, first: 100) {{
+                edges {{
+                    node {{
+                        ... on Discussion {{
+                            title
+                            url
+                            createdAt
+                            upvoteCount
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        "#
+    );
+
+    match github_http_post(&github_token, base_url, &query).await {
+        None => {
+            log::error!(
+                "Failed to send the request to get DiscussionRoot: {}",
+                base_url
+            );
+            return None;
+        }
+        Some(response) => match serde_json::from_slice::<DiscussionRoot>(response.as_slice()) {
+            Err(e) => {
+                log::error!("Failed to parse the response for DiscussionRoot: {}", e);
+                return None;
+            }
+            Ok(results) => {
+                for edge in results.data.search.edges {
+                    if let Some(discussion) = edge.node {
+                        let date = match discussion.createdAt {
+                            Some(date) => date.date_naive(),
+                            None => continue,
+                        };
+
+                        let temp = format!(
+                            "Title: {}, Url: {}, Created At: {}, Upvotes: {}",
+                            discussion.title.as_deref().unwrap_or(""),
+                            discussion.url.as_deref().unwrap_or(""),
+                            date,
+                            discussion.upvoteCount.unwrap_or(0),
+                        );
+                        out.push_str(&temp);
+                    }
+                }
+            }
+        },
+    };
+
     Some(out)
 }

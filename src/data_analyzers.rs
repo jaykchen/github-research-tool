@@ -7,9 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
-
-
-pub async fn analyze_commits(owner: &str, repo: &str, user_name: &str) -> Option<String> {
+pub async fn process_commits(owner: &str, repo: &str, user_name: &str) -> Option<String> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
         login: String,
@@ -33,48 +31,54 @@ pub async fn analyze_commits(owner: &str, repo: &str, user_name: &str) -> Option
             Err(_e) => log::error!("Error parsing commits object: {:?}", _e),
             Ok(commits_obj) => {
                 for sha in commits_obj.into_iter().map(|commit| commit.sha) {
-                    let commit_patch_str =
-                        format!("https://github.com/{owner}/{repo}/commit/{sha}.patch");
-                    match github_http_fetch(&github_token, &commit_patch_str).await {
-                        Some(res) => {
-                            let text = String::from_utf8_lossy(res.as_slice()).to_string();
-
-                            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name} on the {repo} project. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements such as the date of the commit (in 'yyyy/mm/dd' format), a summary of changes, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
-
-                            let usr_prompt_1 = &format!("Based on the provided commit patch: {text}, extract and present the following key elements: the date of the commit (formatted as 'yyyy/mm/dd'), a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item.");
-
-                            let usr_prompt_2 = &format!("Using the key elements you extracted from the commit patch, provide a summary of the user's contributions to the project. Include the date of the commit, the types of files affected, and the overall changes made. When describing the affected files, make sure to differentiate between changes to core code files, scripts, and documentation files. Present your summary in this format: 'On (date in 'yyyy/mm/dd' format), (summary of changes). (overall impact of changes).' Please ensure your answer stayed below 128 tokens.");
-
-                            let sha_serial = sha.chars().take(5).collect::<String>();
-                            match chain_of_chat(
-                                sys_prompt_1,
-                                usr_prompt_1,
-                                &format!("commit-{sha_serial}"),
-                                256,
-                                usr_prompt_2,
-                                128,
-                                &format!("analyze_commits-{sha_serial}"),
-                            )
-                            .await
-                            {
-                                Some(res) => {
-                                    commits_summaries.push_str(&res);
-                                    commits_summaries.push('\n');
-                                    if commits_summaries.len() > 45_000 {
-                                        break;
-                                    }
-                                }
-                                None => continue,
+                    match analyze_commit(owner, repo, user_name, &sha).await {
+                        Some(summary) => {
+                            commits_summaries.push_str(&summary);
+                            commits_summaries.push('\n');
+                            if commits_summaries.len() > 45_000 {
+                                break;
                             }
                         }
-                        None => continue,
-                    };
+                        None => {
+                            log::error!("Error analyzing commit {:?} for user {}", sha, user_name)
+                        }
+                    }
                 }
             }
         },
     }
 
     Some(commits_summaries)
+}
+
+pub async fn analyze_commit(owner: &str, repo: &str, user_name: &str, sha: &str) -> Option<String> {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let commit_patch_str = format!("https://github.com/{owner}/{repo}/commit/{sha}.patch");
+    match github_http_fetch(&github_token, &commit_patch_str).await {
+        Some(res) => {
+            let text = String::from_utf8_lossy(res.as_slice()).to_string();
+
+            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name} on the {repo} project. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements such as the date of the commit (in 'yyyy/mm/dd' format), a summary of changes, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
+
+            let usr_prompt_1 = &format!("Based on the provided commit patch: {text}, extract and present the following key elements: the date of the commit (formatted as 'yyyy/mm/dd'), a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item.");
+
+            let usr_prompt_2 = &format!("Using the key elements you extracted from the commit patch, provide a summary of the user's contributions to the project. Include the date of the commit, the types of files affected, and the overall changes made. When describing the affected files, make sure to differentiate between changes to core code files, scripts, and documentation files. Present your summary in this format: 'On (date in 'yyyy/mm/dd' format), (summary of changes). (overall impact of changes).' Please ensure your answer stayed below 128 tokens.");
+
+            let sha_serial = sha.chars().take(5).collect::<String>();
+            chain_of_chat(
+                sys_prompt_1,
+                usr_prompt_1,
+                &format!("commit-{sha_serial}"),
+                256,
+                usr_prompt_2,
+                128,
+                &format!("analyze_commit-{sha_serial}"),
+            )
+            .await
+        }
+        None => None,
+    }
 }
 
 pub async fn correlate_commits_issues(

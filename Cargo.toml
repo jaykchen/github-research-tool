@@ -25,6 +25,7 @@ flowsnet-platform-sdk = "0.1.5"
 log = "0.4.19"
 store-flows = "0.3.1"
 discord-flows = "0.5.1"
+chrono = "0.4.26"
 
 # [dependencies.http_req_wasi]
 # version = "0.11.1"

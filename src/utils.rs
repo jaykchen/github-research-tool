@@ -1,7 +1,7 @@
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 
-use http_req::{request::Method, request::Request, uri::Uri};
+use http_req::{request::Method, request::Request, response, uri::Uri};
 use log;
 use openai_flows::{
     chat::{ChatModel, ChatOptions},
@@ -141,14 +141,45 @@ pub async fn github_http_fetch(token: &str, url: &str) -> Option<Vec<u8>> {
                 return None;
             };
 
-            return Some(writer);
+            Some(writer)
         }
         Err(_e) => {
             log::error!("Error getting response from Github: {:?}", _e);
+            None
         }
     }
+}
 
-    None
+pub fn github_fetch_with_header(
+    token: &str,
+    url: &str,
+) -> Result<(response::Response, Vec<u8>), Box<dyn std::error::Error>> {
+    let uri = Uri::try_from(url)?;
+    let mut writer = std::io::Cursor::new(Vec::new());
+
+    let response = match Request::new(&uri)
+        .method(Method::GET)
+        .header("User-Agent", "flows-network connector")
+        .header("Content-Type", "application/vnd.github.v3+json")
+        .header("Authorization", &format!("Bearer {}", token))
+        .send(&mut writer)
+    {
+        Ok(res) => {
+            if !res.status_code().is_success() {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "github_fetch_with_header encountered Github http error",
+                )));
+            };
+            res
+        }
+        Err(e) => {
+            log::error!("Error getting response from Github: {:?}", e);
+            return Err(Box::new(e));
+        }
+    };
+
+    Ok((response, writer.into_inner()))
 }
 
 pub async fn github_http_post(token: &str, base_url: &str, query: &str) -> Option<Vec<u8>> {
@@ -167,15 +198,16 @@ pub async fn github_http_post(token: &str, base_url: &str, query: &str) -> Optio
     {
         Ok(res) => {
             if !res.status_code().is_success() {
-                println!("Github http error {:?}", res.status_code());
+                log::error!("Github http error {:?}", res.status_code());
                 return None;
             };
-            return Some(writer);
+            Some(writer)
         }
-        Err(_e) => log::error!("Error getting response from Github: {:?}", _e),
+        Err(_e) => {
+            log::error!("Error getting response from Github: {:?}", _e);
+            None
+        }
     }
-
-    None
 }
 
 pub async fn save_user(username: &str) -> bool {

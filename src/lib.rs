@@ -14,6 +14,7 @@ use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
 use http_req::{
     request::{Method, Request},
+    response,
     uri::Uri,
 };
 use serde::Deserialize;
@@ -96,11 +97,6 @@ async fn register_commands(discord_token: &str) {
     // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
     let guild_id = env::var("discord_guild_id").unwrap_or("1128056245765558364".to_string());
     let guild_id = guild_id.parse::<u64>().unwrap_or(1128056245765558364);
-    //     // Define the Discord API endpoint for registering commands
-    //     let uri = format!(
-    //         "https://discord.com/api/v8/applications/{}/guilds/{}/commands",
-    //         bot_id, guild_id
-    //     );
     let commands = serde_json::json!([
         command_get_user_repos,
         command_save_user,
@@ -124,17 +120,17 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
     }});
     let client = bot.get_client();
     // let channel_id = ac.channel_id.as_u64();
-    let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
-    let application_id = env::var("application_id").unwrap_or("1132483335906664599".to_string());
-    let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
-    let application_id = application_id.parse::<u64>().unwrap_or(1132483335906664599);
+    // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
+    // let application_id = env::var("application_id").unwrap_or("1132483335906664599".to_string());
+    // let channel_id = channel_id.parse::<u64>().unwrap_or(1128056246570860617);
+    // let application_id = application_id.parse::<u64>().unwrap_or(1132483335906664599);
     // let mut application_id: InteractionId = InteractionId(0);
-    let mut interaction_token = String::from("");
+    // let mut interaction_token = String::from("");
     match em {
         EventModel::ApplicationCommand(ac) => {
             // application_id = ac.id;
-            interaction_token = ac.token.clone();
-            client.set_application_id(1132483335906664599);
+            // interaction_token = ac.token.clone();
+            // client.set_application_id(1132483335906664599);
             let initial_response = serde_json::json!(
                     {
             "type": 4,
@@ -144,9 +140,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             }
                 );
             _ = client
-                .create_interaction_response(ac.id.0, &ac.token, &initial_response)
+                .create_interaction_response(ac.id.into(), &ac.token, &initial_response)
                 .await;
-
+            client.set_application_id(ac.application_id.into());
             match ac.data.name.as_str() {
                 "save_user" => {
                     let options = ac
@@ -171,9 +167,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     resp = serde_json::json!({"type": 4, "data": {
                         "content": usernames
                     }});
-                    // _ = client.send_message(*channel_id, &resp).await;
                     match client
-                        .edit_original_interaction_response(&interaction_token, &resp)
+                        .edit_original_interaction_response(&ac.token, &resp)
                         .await
                     {
                         Ok(_) => {}
@@ -217,9 +212,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     });
                     // send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
 
-                    // _ = client.send_message(*channel_id, &resp).await;
                     match client
-                        .edit_original_interaction_response(&interaction_token, &resp)
+                        .edit_original_interaction_response(&ac.token, &resp)
                         .await
                     {
                         Ok(_) => {}
@@ -251,7 +245,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for search_type"),
                     };
 
-                    let search_result = search_mention(search_query, Some(search_type))
+                    let search_result = search_issue(search_query)
                         .await
                         .unwrap_or("Couldn't find anything!".to_string());
 
@@ -261,9 +255,8 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": search_result.to_string()
                         }
                     });
-                    // _ = client.send_message(*channel_id, &resp).await;
                     match client
-                        .edit_original_interaction_response(&interaction_token, &resp)
+                        .edit_original_interaction_response(&ac.token, &resp)
                         .await
                     {
                         Ok(_) => {}
@@ -279,7 +272,6 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             }});
         }
     }
-    // _ = client.send_message(channel_id, &resp).await;
 }
 
 // async fn handler(workspace: &str, channel: &str, sm: SlackMessage) {
