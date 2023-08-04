@@ -163,6 +163,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     let usernames = get("usernames")
                         .unwrap_or(serde_json::json!({}))
                         .to_string();
+                    send_message_to_channel("ik8", "ch_in", usernames.to_string()).await;
 
                     resp = serde_json::json!({"type": 4, "data": {
                         "content": usernames
@@ -210,7 +211,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             "content": user_repos.to_string()
                         }
                     });
-                    // send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
+                    send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
 
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)
@@ -248,6 +249,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     let search_result = search_issue(search_query)
                         .await
                         .unwrap_or("Couldn't find anything!".to_string());
+                    send_message_to_channel("ik8", "ch_in", search_result.to_string()).await;
 
                     resp = serde_json::json!({
                         "type": 4, // type 4 is for Channel Message With Source
