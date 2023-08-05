@@ -11,9 +11,7 @@ use flowsnet_platform_sdk::logger;
 //     Error as OctoError, Page, Result as OctoResult,
 // };
 use crate::octocrab_compat::{Issue, Repository, User};
-use github_flows::octocrab::{
-    Error as OctoError, Page, Result as OctoResult,
-};
+use github_flows::octocrab::{Error as OctoError, Page, Result as OctoResult};
 
 use http_req::{request::Method, request::Request, response::Response, uri::Uri};
 use log::{self, debug};
@@ -428,40 +426,75 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                     Some(date) => date.date_naive().to_string(),
                                     None => continue,
                                 };
-                                let title = issue.title.unwrap_or("".to_string());
-                                let url = issue.url.unwrap_or("".to_string());
-                                let author = issue.author.and_then(|a| a.login).unwrap_or_default();
-
-                                let assignees = issue
-                                    .assignees
-                                    .as_ref()
-                                    .and_then(|e| e.edges.as_ref())
-                                    .map_or(String::new(), |assignee_edges| {
-                                        assignee_edges
-                                            .iter()
-                                            .filter_map(|edge| {
-                                                edge.node.as_ref().and_then(|f| f.login.as_ref())
-                                            })
-                                            .map(AsRef::as_ref)
-                                            .collect::<Vec<&str>>()
-                                            .join(", ")
-                                    });
-
-                                let state = issue.state.unwrap_or_default();
-                                let body = match &issue.body {
-                                    Some(body_text) if body_text.len() > 180 => body_text
-                                        .chars()
-                                        .take(100)
-                                        .skip(body_text.chars().count() - 80)
-                                        .collect::<String>(),
-                                    Some(body_text) => body_text.clone(),
+                                let title_str = match issue.title {
+                                    Some(title) => format!("Title: {},", title),
+                                    None => String::new(),
+                                };
+                                let url_str = match issue.url {
+                                    Some(u) => format!("Url: {}", u),
                                     None => String::new(),
                                 };
 
-                                let assoc = issue.authorAssociation.unwrap_or_default();
+                                let author_str = match issue.author.and_then(|a| a.login) {
+                                    Some(auth) => format!("Author: {},", auth),
+                                    None => String::new(),
+                                };
+
+                                let assignees_str = {
+                                    let assignee_names = issue
+                                        .assignees
+                                        .as_ref()
+                                        .and_then(|e| e.edges.as_ref())
+                                        .map_or(Vec::new(), |assignee_edges| {
+                                            assignee_edges
+                                                .iter()
+                                                .filter_map(|edge| {
+                                                    edge.node
+                                                        .as_ref()
+                                                        .and_then(|f| f.login.as_ref())
+                                                })
+                                                .map(AsRef::as_ref)
+                                                .collect::<Vec<&str>>()
+                                        });
+
+                                    if !assignee_names.is_empty() {
+                                        format!("Assignees: {},", assignee_names.join(", "))
+                                    } else {
+                                        String::new()
+                                    }
+                                };
+
+                                let state_str = match &issue.state {
+                                    Some(s) => format!("State: {},", s),
+                                    None => String::new(),
+                                };
+
+                                let body_str = match &issue.body {
+                                    Some(body_text) if body_text.len() > 180 => {
+                                        let truncated_body = body_text
+                                            .chars()
+                                            .take(100)
+                                            .chain(
+                                                body_text
+                                                    .chars()
+                                                    .skip(body_text.chars().count() - 80),
+                                            )
+                                            .collect::<String>();
+                                        format!("Body: {}", truncated_body)
+                                    }
+                                    Some(body_text) => format!("Body: {},", body_text),
+                                    None => String::new(),
+                                };
+
+                                let assoc_str = match &issue.authorAssociation {
+                                    Some(association) => {
+                                        format!("Author Association: {}", association)
+                                    }
+                                    None => String::new(),
+                                };
 
                                 let temp = format!(
-                                            "Title: {title} Url: {url} Created At: {date} Author: {author} Assignees: {assignees} State: {state} Body: {body} Author Association: {assoc}");
+                                            "{title_str} {url_str} Created At: {date} {author_str} {assignees_str}  {state_str} {body_str} {assoc_str}");
 
                                 out.push_str(&temp);
                                 out.push_str("\n");
