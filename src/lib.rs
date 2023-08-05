@@ -1,6 +1,7 @@
 pub mod data_analyzers;
 pub mod github_data_fetchers;
 pub mod utils;
+pub mod octocrab_compat;
 use data_analyzers::*;
 use discord_flows::{
     http::HttpBuilder,

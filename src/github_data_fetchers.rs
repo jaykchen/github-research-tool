@@ -2,14 +2,19 @@ use crate::utils::*;
 use chrono::{DateTime, Utc};
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
+// use github_flows::octocrab::{
+//     models::{issues::Issue, Repository, User},
+//     params::{
+//         repos::{Sort, Type},
+//         Direction,
+//     },
+//     Error as OctoError, Page, Result as OctoResult,
+// };
+use crate::octocrab_compat::{Issue, Repository, User};
 use github_flows::octocrab::{
-    models::{issues::Issue, Repository, User},
-    params::{
-        repos::{Sort, Type},
-        Direction,
-    },
     Error as OctoError, Page, Result as OctoResult,
 };
+
 use http_req::{request::Method, request::Request, response::Response, uri::Uri};
 use log::{self, debug};
 use serde::{Deserialize, Serialize};
