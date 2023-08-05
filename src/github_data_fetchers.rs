@@ -2,17 +2,39 @@ use crate::utils::*;
 use chrono::{DateTime, Utc};
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
-use github_flows::{
-    get_octo,
-    octocrab::{models::issues::Issue, Error as OctoError},
-    GithubLogin,
+use github_flows::octocrab::{
+    models::{issues::Issue, Repository, User},
+    params::{
+        repos::{Sort, Type},
+        Direction,
+    },
+    Error as OctoError, Page, Result as OctoResult,
 };
 use http_req::{request::Method, request::Request, response::Response, uri::Uri};
-use log;
+use log::{self, debug};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 use store_flows::{get, set};
+
+pub async fn get_user_profile(user: &str) -> Option<String> {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let user_profile_url = format!("https://api.github.com/users/{user}");
+
+    match github_http_fetch(&github_token, &user_profile_url).await {
+        Some(res) => match serde_json::from_slice::<User>(res.as_slice()) {
+            Ok(u) => Some(format!("{:?}", u)),
+            Err(e) => {
+                log::error!("Error parsing User: {:?}", e);
+                None
+            }
+        },
+        None => {
+            log::error!("Github user not found.");
+            None
+        }
+    }
+}
 
 pub async fn is_new_contributor(user_name: &str) -> bool {
     match get("usernames")
@@ -80,13 +102,14 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
                     return None;
                 }
 
-                let new_contributors: Vec<GithubUser> = match serde_json::from_slice(body.as_slice()) {
-                    Ok(contributors) => contributors,
-                    Err(err) => {
-                        log::error!("Error parsing contributors: {:?}", err);
-                        return None;
-                    }
-                };
+                let new_contributors: Vec<GithubUser> =
+                    match serde_json::from_slice(body.as_slice()) {
+                        Ok(contributors) => contributors,
+                        Err(err) => {
+                            log::error!("Error parsing contributors: {:?}", err);
+                            return None;
+                        }
+                    };
 
                 contributors.extend(new_contributors.into_iter().map(|user| user.login));
 
@@ -276,111 +299,35 @@ pub async fn get_user_repos(user_name: &str, language: &str) -> Option<String> {
     };
     Some(out)
 }
-pub async fn get_user_repos_octo(user_name: &str, language: &str) -> Option<String> {
-    #[derive(Debug, Deserialize)]
-    struct Root {
-        data: Data,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Data {
-        search: Search,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Search {
-        nodes: Vec<Node>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Node {
-        name: String,
-        defaultBranchRef: BranchRef,
-        stargazers: Stargazers,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct BranchRef {
-        target: Target,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Target {
-        history: History,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct History {
-        totalCount: i32,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Stargazers {
-        totalCount: i32,
-    }
-    let octocrab = get_octo(&GithubLogin::Default);
-    let query = format!(
-        r#"
-    query {{
-        search(query: "user:{} language:{}", type: REPOSITORY, first: 100) {{
-            nodes {{
-                ... on Repository {{
-                    name
-                    defaultBranchRef {{
-                        target {{
-                            ... on Commit {{
-                                history(first: 0) {{
-                                    totalCount
-                                }}
-                            }}
-                        }}
-                    }}
-                    stargazers {{
-                        totalCount
-                    }}
-                }}
-            }}
-        }}
-    }}
-    "#,
-        user_name, language
-    );
-
-    let res: Result<Root, OctoError> = octocrab
-        .graphql(&serde_json::json! ({
-            "query": query
-        }))
-        .await;
-
-    let mut out = String::new();
-    match res {
-        Err(_e) => log::error!("Failed to send the request to {}", _e.to_string()),
-        Ok(response) => {
-            let mut repos_sorted: Vec<&Node> = response.data.search.nodes.iter().collect();
-            repos_sorted.sort_by(|a, b| b.stargazers.totalCount.cmp(&a.stargazers.totalCount));
-
-            for repo in repos_sorted {
-                let temp = format!(
-                    "Repo: {}, Stars: {}, Commits: {}",
-                    repo.name,
-                    repo.stargazers.totalCount,
-                    repo.defaultBranchRef.target.history.totalCount
-                );
-                out.push_str(&temp);
-            }
-
-            log::error!("Found {} repositories", response.data.search.nodes.len());
-        }
-    };
-    Some(out)
-}
 
 pub async fn search_issue(search_query: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
+    pub struct User {
+        login: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct AssigneeNode {
+        node: Option<User>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct AssigneeEdge {
+        edges: Option<Vec<AssigneeNode>>,
+    }
+
+    #[derive(Debug, Deserialize)]
     struct Issue {
-        title: Option<String>,
         url: Option<String>,
+        number: Option<u64>,
+        state: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        author: Option<User>,
+        assignees: Option<AssigneeEdge>,
+        authorAssociation: Option<String>,
         createdAt: Option<DateTime<Utc>>,
+        updatedAt: Option<DateTime<Utc>>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -388,14 +335,21 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
         node: Option<Issue>,
     }
 
+    #[derive(Debug, Deserialize, Clone)]
+    struct PageInfo {
+        endCursor: Option<String>,
+        hasNextPage: Option<bool>,
+    }
+
     #[derive(Debug, Deserialize)]
-    struct IssueEdge {
+    struct SearchResult {
         edges: Vec<IssueNode>,
+        pageInfo: PageInfo,
     }
 
     #[derive(Debug, Deserialize)]
     struct IssueSearch {
-        search: IssueEdge,
+        search: SearchResult,
     }
 
     #[derive(Debug, Deserialize)]
@@ -407,50 +361,135 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
     let base_url = "https://api.github.com/graphql";
     let mut out = String::from("ISSUES \n");
 
-    let query = format!(
-        r#"
-        query {{
-            search(query: "{search_query}", type: ISSUE, first: 100) {{
-                edges {{
-                    node {{
-                        ... on Issue {{
-                            title
-                            url
-                            createdAt
+    let mut cursor = None;
+
+    loop {
+        let query = format!(
+            r#"
+            query {{
+                search(query: "{search_query}", type: ISSUE, first: 100{after}) {{
+                    edges {{
+                        node {{
+                            ... on Issue {{
+                                url
+                                number
+                                state
+                                title
+                                body
+                                author {{
+                                    login
+                                }}
+                                assignees(first: 100) {{
+                                    edges {{
+                                        node {{
+                                            login
+                                        }}
+                                    }}
+                                }}
+                                authorAssociation
+                                createdAt
+                                updatedAt
+                            }}
                         }}
                     }}
+                    pageInfo {{
+                        endCursor
+                        hasNextPage
+                      }}
                 }}
             }}
-        }}
-        "#
-    );
+            "#,
+            search_query = search_query,
+            after = cursor
+                .as_ref()
+                .map_or(String::new(), |c| format!(r#", after: "{}""#, c)),
+        );
 
-    match github_http_post(&github_token, base_url, &query).await {
-        None => log::error!("Failed to send the request: {}", base_url),
-        Some(response) => match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
-            Err(e) => log::error!("Failed to parse the response: {}", e),
-            Ok(results) => {
-                for edge in results.data.search.edges {
-                    match edge.node {
-                        Some(issue) => {
-                            let date = match issue.createdAt {
-                                Some(date) => date.date_naive().to_string(),
-                                None => continue,
-                            };
-                            let temp = format!(
-                                "Title: {}, Url: {}, Created At: {}",
-                                issue.title.unwrap_or("".to_string()),
-                                issue.url.unwrap_or("".to_string()),
-                                date,
-                            );
-                            out.push_str(&temp);
-                        }
-                        None => continue,
-                    }
-                }
+        match github_http_post(&github_token, base_url, &query).await {
+            None => {
+                println!("Failed to send the request: {}", base_url);
+                break;
             }
-        },
-    };
+            Some(response) => match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
+                Err(e) => {
+                    println!("Failed to parse the response: {}", e);
+                    break;
+                }
+                Ok(results) => {
+                    for edge in results.data.search.edges {
+                        match edge.node {
+                            Some(issue) => {
+                                let date = match issue.createdAt {
+                                    Some(date) => date.date_naive().to_string(),
+                                    None => continue,
+                                };
+                                let title = issue.title.unwrap_or("".to_string());
+                                let url = issue.url.unwrap_or("".to_string());
+                                let author = issue.author.and_then(|a| a.login).unwrap_or_default();
+
+                                let assignees = issue
+                                    .assignees
+                                    .as_ref()
+                                    .and_then(|e| e.edges.as_ref())
+                                    .map_or(String::new(), |assignee_edges| {
+                                        assignee_edges
+                                            .iter()
+                                            .filter_map(|edge| {
+                                                edge.node.as_ref().and_then(|f| f.login.as_ref())
+                                            })
+                                            .map(AsRef::as_ref)
+                                            .collect::<Vec<&str>>()
+                                            .join(", ")
+                                    });
+
+                                let state = issue.state.unwrap_or_default();
+                                let body = match &issue.body {
+                                    Some(body_text) if body_text.len() > 180 => body_text
+                                        .chars()
+                                        .take(100)
+                                        .skip(body_text.chars().count() - 80)
+                                        .collect::<String>(),
+                                    Some(body_text) => body_text.clone(),
+                                    None => String::new(),
+                                };
+
+                                let assoc = issue.authorAssociation.unwrap_or_default();
+
+                                let temp = format!(
+                                            "Title: {title} Url: {url} Created At: {date} Author: {author} Assignees: {assignees} State: {state} Body: {body} Author Association: {assoc}");
+
+                                out.push_str(&temp);
+                                out.push_str("\n");
+                            }
+
+                            None => continue,
+                        }
+                    }
+
+                    let page_info: PageInfo = results.data.search.pageInfo;
+                    if let Some(has_next_page) = page_info.hasNextPage {
+                        if has_next_page {
+                            match &page_info.endCursor {
+                                Some(end_cursor) => {
+                                    cursor = Some(end_cursor.clone());
+                                    println!(
+                                        "Fetched a page, moving to next page with cursor: {}",
+                                        end_cursor
+                                    );
+                                    continue;
+                                }
+                                None => {
+                                    println!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            },
+        };
+    }
 
     Some(out)
 }
