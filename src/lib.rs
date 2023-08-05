@@ -1,7 +1,7 @@
 pub mod data_analyzers;
 pub mod github_data_fetchers;
-pub mod utils;
 pub mod octocrab_compat;
+pub mod utils;
 use data_analyzers::*;
 use discord_flows::{
     http::HttpBuilder,
@@ -267,7 +267,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     }
 
                     send_message_to_channel("ik8", "ch_in", search_result.to_string()).await;
-
+                    let search_result = search_result.chars().take(1900).collect::<String>();
                     resp = serde_json::json!({
                         "content": search_result.to_string()
                     });
