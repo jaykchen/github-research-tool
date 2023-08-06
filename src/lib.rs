@@ -25,27 +25,30 @@ use std::env;
 use store_flows::{get, set};
 use utils::*;
 
+use std::sync::Mutex;
+
+static REGISTERED: Mutex<Option<bool>> = Mutex::new(None);
+
+async fn register_once(discord_token: &str) -> bool {
+    let mut registered = REGISTERED.lock().unwrap();
+
+    let discord_token = env::var("discord_token").unwrap();
+    if registered.is_some() {
+        return registered.unwrap();
+    }
+    let success = register_commands(&discord_token).await;
+    *registered = Some(success);
+
+    success
+}
+
 #[no_mangle]
 #[tokio::main(flavor = "current_thread")]
 pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    let mut commands_registered = false;
-
-    match get("gh_bot_commands_registered") {
-        Some(s) => {
-            commands_registered = serde_json::from_value::<bool>(s).unwrap_or_else(|_| false);
-        }
-        None => {}
-    }
-
-    if !commands_registered {
-        match register_commands(&discord_token).await {
-            false => set("gh_bot_commands_registered", serde_json::json!(false), None),
-            true => set("gh_bot_commands_registered", serde_json::json!(true), None),
-        };
-    }
+    let _ = register_once(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
@@ -268,8 +271,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => unreachable!("invalid search_type"),
                     }
 
-                    send_message_to_channel("ik8", "ch_in", search_result.to_string()).await;
-                    let search_result = search_result.chars().take(1900).collect::<String>();
+                    let search_result = search_result.chars().take(500).collect::<String>();
                     resp = serde_json::json!({
                         "content": search_result.to_string()
                     });
