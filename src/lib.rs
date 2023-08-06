@@ -206,14 +206,14 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for language"),
                     };
 
-                    let user_repos = get_user_repos(username, language)
-                        .await
-                        .unwrap_or("Couldn't get any repos!".to_string());
+                    // let user_repos = get_user_repos_in_language(username, language)
+                    //     .await
+                    //     .unwrap_or("Couldn't get any repos!".to_string());
 
-                    resp = serde_json::json!({
-                        "content": user_repos.to_string()
-                    });
-                    send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
+                    // resp = serde_json::json!({
+                    //     "content": user_repos.to_string()
+                    // });
+                    // send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
 
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)

@@ -1,6 +1,6 @@
 use crate::octocrab_compat::{Issue, Repository, User};
 use crate::utils::*;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use http_req::{request::Method, request::Request, response::Response, uri::Uri};
@@ -29,26 +29,26 @@ pub async fn get_user_profile(user: &str) -> Option<String> {
     }
 }
 
-pub async fn is_new_contributor(user_name: &str) -> bool {
-    match get("usernames")
+pub async fn is_new_contributor(user_name: &str, key: &str) -> bool {
+    match get(key)
         .and_then(|val| serde_json::from_value::<std::collections::HashSet<String>>(val).ok())
     {
         Some(set) => !set.contains(user_name),
         None => true,
     }
 }
-pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
+pub async fn populate_contributors(owner: &str, repo: &str, key: &str) -> (bool, u16) {
     match get_contributors(owner, repo).await {
         None => (false, 0_u16),
 
         Some(contributors) => {
             set(
-                "contributors",
+                key,
                 serde_json::to_value(contributors).unwrap_or_default(),
                 None,
             );
 
-            match get("contributors").and_then(|val| {
+            match get(key).and_then(|val| {
                 serde_json::from_value::<std::collections::HashSet<String>>(val).ok()
             }) {
                 Some(set) => (true, set.len() as u16),
@@ -144,56 +144,189 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     Some(contributors)
 }
 
-pub async fn get_issues(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
+pub async fn get_user_issues_on_repo_last_n_days(
+    owner: &str,
+    repo: &str,
+    user: &str,
+    n_days: u16,
+) -> Option<Vec<Issue>> {
     #[derive(Debug, Deserialize)]
     struct Page<T> {
         pub items: Vec<T>,
-        // pub incomplete_results: Option<bool>,
         pub total_count: Option<u64>,
-        // pub next: Option<String>,
-        // pub prev: Option<String>,
-        // pub first: Option<String>,
-        // pub last: Option<String>,
     }
+    let now = Utc::now();
+
+    let n_days_ago = now - Duration::days(n_days.into());
+    let n_days_ago_str = n_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let query = format!("repo:{owner}/{repo} involves:{user} updated:>{n_days_ago_str}");
+    let encoded_query = urlencoding::encode(&query);
+
+    let mut out: Vec<Issue> = vec![];
+    let mut total_pages = None;
+    let mut current_page = 1;
+    let mut count = 0;
+    loop {
+        let url_str = format!(
+            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
+        );
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
+                Err(_e) => {
+                    log::error!("Error parsing Page<Issue>: {:?}", _e);
+                    break;
+                }
+                Ok(issue_page) => {
+                    if total_pages.is_none() {
+                        if let Some(count) = issue_page.total_count {
+                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
+                        }
+                    }
+
+                    for issue in issue_page.items {
+                        out.push(issue);
+                        count += 1;
+
+                        if count > 1 {
+                            break;
+                        }
+                    }
+
+                    current_page += 1;
+                    if current_page > total_pages.unwrap_or(usize::MAX) {
+                        break;
+                    }
+                }
+            },
+            None => break,
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+pub async fn get_user_issues_on_repo(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
+    #[derive(Debug, Deserialize)]
+    struct Page<T> {
+        pub items: Vec<T>,
+        pub total_count: Option<u64>,
+    }
+
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let query = format!("repo:{owner}/{repo} involves:{user}");
     let encoded_query = urlencoding::encode(&query);
 
     let mut out: Vec<Issue> = vec![];
     let mut total_pages = None;
-    for page in 1..=3 {
-        if page > total_pages.unwrap_or(3) {
-            break;
-        }
-
+    let mut current_page = 1;
+    let mut count = 0;
+    loop {
         let url_str = format!(
-            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={page}"
+            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
         );
 
         match github_http_fetch(&github_token, &url_str).await {
             Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
-                Err(_e) => log::error!("Error parsing Page<Issue>: {:?}", _e),
-
+                Err(_e) => {
+                    log::error!("Error parsing Page<Issue>: {:?}", _e);
+                    break;
+                }
                 Ok(issue_page) => {
                     if total_pages.is_none() {
                         if let Some(count) = issue_page.total_count {
-                            total_pages = Some((count / 30) as usize + 1);
+                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
                         }
                     }
+
                     for issue in issue_page.items {
                         out.push(issue);
+                        count += 1;
+
+                        if count > 99 {
+                            break;
+                        }
+                    }
+
+                    current_page += 1;
+                    if current_page > total_pages.unwrap_or(usize::MAX) {
+                        break;
                     }
                 }
             },
-
-            None => {}
+            None => break,
         }
     }
 
-    Some(out)
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
-pub async fn get_user_repos(user_name: &str, language: &str) -> Option<String> {
+pub async fn get_user_repos_in_language(user: &str, language: &str) -> Option<Vec<Repository>> {
+    #[derive(Debug, Deserialize)]
+    struct Page<T> {
+        pub items: Vec<T>,
+        pub total_count: Option<u64>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let query = format!("user:{} language:{} sort:stars", user, language); 
+    let encoded_query = urlencoding::encode(&query);
+
+    let mut out: Vec<Repository> = vec![];
+    let mut total_pages = None;
+    let mut current_page = 1;
+
+    loop {
+        let url_str = format!(
+            "https://api.github.com/search/repositories?q={}&page={}",
+            encoded_query, current_page
+        );
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) => match serde_json::from_slice::<Page<Repository>>(res.as_slice()) {
+                Err(_e) => {
+                    log::error!("Error parsing Page<Repository>: {:?}", _e);
+                    break;
+                }
+                Ok(repo_page) => {
+                    if total_pages.is_none() {
+                        if let Some(count) = repo_page.total_count {
+                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
+                        }
+                    }
+
+                    for repo in repo_page.items {
+                        out.push(repo);
+                    }
+
+                    current_page += 1;
+                    if current_page > total_pages.unwrap_or(usize::MAX) {
+                        break;
+                    }
+                }
+            },
+            None => break,
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
     struct Root {
         data: Data,
@@ -400,12 +533,12 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
 
         match github_http_post(&github_token, base_url, &query).await {
             None => {
-                println!("Failed to send the request: {}", base_url);
+                log::error!("Failed to send the request: {}", base_url);
                 break;
             }
             Some(response) => match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
                 Err(e) => {
-                    println!("Failed to parse the response: {}", e);
+                    log::error!("Failed to parse the response: {}", e);
                     break;
                 }
                 Ok(results) => {
@@ -509,14 +642,14 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                     match &page_info.endCursor {
                                         Some(end_cursor) => {
                                             cursor = Some(end_cursor.clone());
-                                            println!(
+                                            log::info!(
                                                 "Fetched a page, moving to next page with cursor: {}",
                                                 end_cursor
                                             );
                                             continue;
                                         }
                                         None => {
-                                            println!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
+                                            log::error!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
                                             break;
                                         }
                                     }
