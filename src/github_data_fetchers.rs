@@ -1,18 +1,8 @@
+use crate::octocrab_compat::{Issue, Repository, User};
 use crate::utils::*;
 use chrono::{DateTime, Utc};
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
-// use github_flows::octocrab::{
-//     models::{issues::Issue, Repository, User},
-//     params::{
-//         repos::{Sort, Type},
-//         Direction,
-//     },
-//     Error as OctoError, Page, Result as OctoResult,
-// };
-use crate::octocrab_compat::{Issue, Repository, User};
-use github_flows::octocrab::{Error as OctoError, Page, Result as OctoResult};
-
 use http_req::{request::Method, request::Request, response::Response, uri::Uri};
 use log::{self, debug};
 use serde::{Deserialize, Serialize};
@@ -480,6 +470,7 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                                     .skip(body_text.chars().count() - 80),
                                             )
                                             .collect::<String>();
+
                                         format!("Body: {}", truncated_body)
                                     }
                                     Some(body_text) => format!("Body: {},", body_text),
@@ -554,13 +545,15 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
     }
 
     #[derive(Debug, Deserialize)]
-    struct RepositoryEdge {
-        edges: Vec<RepositoryNode>,
+    struct PageInfo {
+        endCursor: Option<String>,
+        hasNextPage: Option<bool>,
     }
 
     #[derive(Debug, Deserialize)]
     struct RepositorySearch {
-        search: RepositoryEdge,
+        edges: Vec<RepositoryNode>,
+        pageInfo: PageInfo,
     }
 
     #[derive(Debug, Deserialize)]
@@ -572,65 +565,115 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
     let base_url = "https://api.github.com/graphql";
     let mut out = String::from("REPOSITORY \n");
 
-    let query = format!(
-        r#"query {{
-                search(query: "{search_query}", type: REPOSITORY, first: 100) {{
-                    edges {{
-                        node {{
-                            ... on Repository {{
-                                name
-                                description
-                                url
-                                createdAt
-                                stargazers {{
-                                  totalCount
+    let mut cursor = None;
+
+    loop {
+        let query = format!(
+            r#"
+                query {{
+                    search(query: "{search_query}", type: REPOSITORY, first: 100{after}) {{
+                        edges {{
+                            node {{
+                                ... on Repository {{
+                                    name
+                                    description
+                                    url
+                                    createdAt
+                                    stargazers {{
+                                      totalCount
+                                    }}
+                                    forkCount
                                 }}
-                                forkCount
                             }}
+                        }}
+                        pageInfo {{
+                            endCursor
+                            hasNextPage
                         }}
                     }}
                 }}
-            }}
-            "#
-    );
+            "#,
+            search_query = search_query,
+            after = cursor
+                .as_ref()
+                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
+        );
 
-    match github_http_post(&github_token, base_url, &query).await {
-        None => log::error!(
-            "Failed to send the request to get RepositoryRoot: {}",
-            base_url
-        ),
-        Some(response) => match serde_json::from_slice::<RepositoryRoot>(response.as_slice()) {
-            Err(e) => log::error!("Failed to parse the responsefor RepositoryRoot: {}", e),
-            Ok(results) => {
-                for edge in results.data.search.edges {
-                    match edge.node {
-                        Some(repo) => {
-                            let date = match repo.createdAt {
+        match github_http_post(&github_token, base_url, &query).await {
+            None => {
+                log::error!(
+                    "Failed to send the request to get RepositoryRoot: {}",
+                    base_url
+                );
+                return None;
+            }
+            Some(response) => match serde_json::from_slice::<RepositoryRoot>(response.as_slice()) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for RepositoryRoot: {}", e);
+                    return None;
+                }
+                Ok(results) => {
+                    for edge in results.data.edges {
+                        if let Some(repo) = edge.node {
+                            let date_str = match &repo.createdAt {
                                 Some(date) => date.date_naive().to_string(),
                                 None => continue,
                             };
-                            let stars = match repo.stargazers {
-                                Some(s) => s.totalCount,
-                                None => 0,
+                            let name_str = match &repo.name {
+                                Some(name) => format!("Name: {},", name),
+                                None => String::new(),
                             };
-                            let forks = repo.forkCount.unwrap_or(0);
-                            let temp = format!(
-                                    "Name: {}, Description: {}, Url: {}, Created At: {}, Stars: {}, Forks: {}",
-                                    repo.name.unwrap_or("".to_string()),
-                                    repo.description.unwrap_or("".to_string()),
-                                    repo.url.unwrap_or("".to_string()),
-                                    date,
-                                    stars,
-                                    forks,
-                                );
-                            out.push_str(&temp);
+                            let desc_str = match &repo.description {
+                                Some(desc) if desc.len() > 300 => {
+                                    let truncated_desc = desc.chars().take(180)
+                                    .chain(desc.chars().skip(desc.chars().count() - 80))
+                                    .collect::<String>();
+                                
+                                    format!("Description: {}", truncated_desc)
+                                }
+                                Some(desc) => format!("Description: {},", desc),
+                                None => String::new(),
+                            };
+
+                            let url_str = match &repo.url {
+                                Some(url) => format!("Url: {}", url),
+                                None => String::new(),
+                            };
+                            let stars_str = match &repo.stargazers {
+                                Some(sg) => format!("Stars: {},", sg.totalCount),
+                                None => String::new(),
+                            };
+                            let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
+
+                            out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
                         }
-                        None => continue,
+                    }
+
+                    let page_info: PageInfo = results.data.pageInfo; // Adjusted this line
+                    if let Some(has_next_page) = page_info.hasNextPage {
+                        if has_next_page {
+                            match &page_info.endCursor {
+                                Some(end_cursor) => {
+                                    cursor = Some(end_cursor.clone());
+                                    println!(
+                                        "Fetched a page, moving to next page with cursor: {}",
+                                        end_cursor
+                                    );
+                                    continue;
+                                }
+                                None => {
+                                    log::error!(
+                                        "Warning: hasNextPage is true, but endCursor is None. This might result in missing data."
+                                    );
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        },
-    };
+            },
+        };
+    }
 
     Some(out)
 }
