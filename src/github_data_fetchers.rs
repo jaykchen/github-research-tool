@@ -294,22 +294,22 @@ pub async fn get_user_repos(user_name: &str, language: &str) -> Option<String> {
 }
 
 pub async fn search_issue(search_query: &str) -> Option<String> {
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize,Clone)]
     pub struct User {
         login: Option<String>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize,Clone)]
     struct AssigneeNode {
         node: Option<User>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize,Clone)]
     struct AssigneeEdge {
-        edges: Option<Vec<AssigneeNode>>,
+        edges: Option<Vec<Option<AssigneeNode>>>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize,Clone)]
     struct Issue {
         url: Option<String>,
         number: Option<u64>,
@@ -336,18 +336,18 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
 
     #[derive(Debug, Deserialize)]
     struct SearchResult {
-        edges: Vec<IssueNode>,
-        pageInfo: PageInfo,
+        edges: Option<Vec<Option<IssueNode>>>,
+        pageInfo: Option<PageInfo>,
     }
 
     #[derive(Debug, Deserialize)]
     struct IssueSearch {
-        search: SearchResult,
+        search: Option<SearchResult>,
     }
 
     #[derive(Debug, Deserialize)]
     struct IssueRoot {
-        data: IssueSearch,
+        data: Option<IssueSearch>,
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
@@ -409,107 +409,117 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                     break;
                 }
                 Ok(results) => {
-                    for edge in results.data.search.edges {
-                        match edge.node {
-                            Some(issue) => {
-                                let date = match issue.createdAt {
-                                    Some(date) => date.date_naive().to_string(),
-                                    None => continue,
-                                };
-                                let title_str = match issue.title {
-                                    Some(title) => format!("Title: {},", title),
-                                    None => String::new(),
-                                };
-                                let url_str = match issue.url {
-                                    Some(u) => format!("Url: {}", u),
-                                    None => String::new(),
-                                };
+                    if let Some(search) = &results.data.as_ref().and_then(|d| d.search.as_ref()) {
+                        if let Some(edges) = &search.edges {
+                            for edge in edges.iter().filter_map(|e| e.as_ref()) {
+                                if let Some(issue) = &edge.node {
+                                    let date = match issue.createdAt {
+                                        Some(date) => date.date_naive().to_string(),
+                                        None => continue,
+                                    };
+                                    let title_str = match &issue.title {
+                                        Some(title) => format!("Title: {},", title),
+                                        None => String::new(),
+                                    };
+                                    let url_str = match &issue.url {
+                                        Some(u) => format!("Url: {}", u),
+                                        None => String::new(),
+                                    };
 
-                                let author_str = match issue.author.and_then(|a| a.login) {
-                                    Some(auth) => format!("Author: {},", auth),
-                                    None => String::new(),
-                                };
+                                    let author_str = match issue.clone().author.and_then(|a| a.login) {
+                                        Some(auth) => format!("Author: {},", auth),
+                                        None => String::new(),
+                                    };
 
-                                let assignees_str = {
-                                    let assignee_names = issue
-                                        .assignees
-                                        .as_ref()
-                                        .and_then(|e| e.edges.as_ref())
-                                        .map_or(Vec::new(), |assignee_edges| {
-                                            assignee_edges
-                                                .iter()
-                                                .filter_map(|edge| {
-                                                    edge.node
-                                                        .as_ref()
-                                                        .and_then(|f| f.login.as_ref())
-                                                })
-                                                .map(AsRef::as_ref)
-                                                .collect::<Vec<&str>>()
-                                        });
+                                    let assignees_str = {
+                                        let assignee_names = issue
+                                            .assignees
+                                            .as_ref()
+                                            .and_then(|e| e.edges.as_ref())
+                                            .map_or(Vec::new(), |assignee_edges| {
+                                                assignee_edges
+                                                    .iter()
+                                                    .filter_map(|edge| {
+                                                        edge.as_ref().and_then(|actual_edge| {
+                                                            actual_edge.node.as_ref().and_then(
+                                                                |user| {
+                                                                    user.login.as_ref().map(
+                                                                        |login_str| {
+                                                                            login_str.as_str()
+                                                                        },
+                                                                    )
+                                                                },
+                                                            )
+                                                        })
+                                                    })
+                                                    .collect::<Vec<&str>>()
+                                            });
 
-                                    if !assignee_names.is_empty() {
-                                        format!("Assignees: {},", assignee_names.join(", "))
-                                    } else {
-                                        String::new()
-                                    }
-                                };
+                                        if !assignee_names.is_empty() {
+                                            format!("Assignees: {},", assignee_names.join(", "))
+                                        } else {
+                                            String::new()
+                                        }
+                                    };
 
-                                let state_str = match &issue.state {
-                                    Some(s) => format!("State: {},", s),
-                                    None => String::new(),
-                                };
+                                    let state_str = match &issue.state {
+                                        Some(s) => format!("State: {},", s),
+                                        None => String::new(),
+                                    };
 
-                                let body_str = match &issue.body {
-                                    Some(body_text) if body_text.len() > 180 => {
-                                        let truncated_body = body_text
-                                            .chars()
-                                            .take(100)
-                                            .chain(
-                                                body_text
-                                                    .chars()
-                                                    .skip(body_text.chars().count() - 80),
-                                            )
-                                            .collect::<String>();
+                                    let body_str = match &issue.body {
+                                        Some(body_text) if body_text.len() > 180 => {
+                                            let truncated_body = body_text
+                                                .chars()
+                                                .take(100)
+                                                .chain(
+                                                    body_text
+                                                        .chars()
+                                                        .skip(body_text.chars().count() - 80),
+                                                )
+                                                .collect::<String>();
 
-                                        format!("Body: {}", truncated_body)
-                                    }
-                                    Some(body_text) => format!("Body: {},", body_text),
-                                    None => String::new(),
-                                };
+                                            format!("Body: {}", truncated_body)
+                                        }
+                                        Some(body_text) => format!("Body: {},", body_text),
+                                        None => String::new(),
+                                    };
 
-                                let assoc_str = match &issue.authorAssociation {
-                                    Some(association) => {
-                                        format!("Author Association: {}", association)
-                                    }
-                                    None => String::new(),
-                                };
+                                    let assoc_str = match &issue.authorAssociation {
+                                        Some(association) => {
+                                            format!("Author Association: {}", association)
+                                        }
+                                        None => String::new(),
+                                    };
 
-                                let temp = format!(
-                                            "{title_str} {url_str} Created At: {date} {author_str} {assignees_str}  {state_str} {body_str} {assoc_str}");
+                                    let temp = format!(
+                                                    "{title_str} {url_str} Created At: {date} {author_str} {assignees_str}  {state_str} {body_str} {assoc_str}");
 
-                                out.push_str(&temp);
-                                out.push_str("\n");
-                            }
-
-                            None => continue,
-                        }
-                    }
-
-                    let page_info: PageInfo = results.data.search.pageInfo;
-                    if let Some(has_next_page) = page_info.hasNextPage {
-                        if has_next_page {
-                            match &page_info.endCursor {
-                                Some(end_cursor) => {
-                                    cursor = Some(end_cursor.clone());
-                                    println!(
-                                        "Fetched a page, moving to next page with cursor: {}",
-                                        end_cursor
-                                    );
+                                    out.push_str(&temp);
+                                    out.push_str("\n");
+                                } else {
                                     continue;
                                 }
-                                None => {
-                                    println!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
-                                    break;
+                            }
+                        }
+
+                        if let Some(page_info) = &search.pageInfo {
+                            if let Some(has_next_page) = page_info.hasNextPage {
+                                if has_next_page {
+                                    match &page_info.endCursor {
+                                        Some(end_cursor) => {
+                                            cursor = Some(end_cursor.clone());
+                                            println!(
+                                                "Fetched a page, moving to next page with cursor: {}",
+                                                end_cursor
+                                            );
+                                            continue;
+                                        }
+                                        None => {
+                                            println!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -517,411 +527,11 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                     break;
                 }
             },
-        };
-    }
-
-    Some(out)
-}
-
-/* pub async fn search_repository(search_query: &str) -> Option<String> {
-    #[derive(Debug, Deserialize)]
-    struct StarGazers {
-        totalCount: i32,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Repository {
-        name: Option<String>,
-        description: Option<String>,
-        url: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
-        stargazers: Option<StarGazers>,
-        forkCount: Option<i32>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct RepositoryNode {
-        node: Option<Repository>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct PageInfo {
-        endCursor: Option<String>,
-        hasNextPage: Option<bool>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct RepositorySearch {
-        edges: Vec<RepositoryNode>,
-        pageInfo: PageInfo,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct RepositoryRoot {
-        data: RepositorySearch,
-    }
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let base_url = "https://api.github.com/graphql";
-    let mut out = String::from("REPOSITORY \n");
-
-    let mut cursor = None;
-
-    loop {
-        let query = format!(
-            r#"
-                query {{
-                    search(query: "{search_query}", type: REPOSITORY, first: 100{after}) {{
-                        edges {{
-                            node {{
-                                ... on Repository {{
-                                    name
-                                    description
-                                    url
-                                    createdAt
-                                    stargazers {{
-                                      totalCount
-                                    }}
-                                    forkCount
-                                }}
-                            }}
-                        }}
-                        pageInfo {{
-                            endCursor
-                            hasNextPage
-                        }}
-                    }}
-                }}
-            "#,
-            search_query = search_query,
-            after = cursor
-                .as_ref()
-                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
-        );
-
-        match github_http_post(&github_token, base_url, &query).await {
-            None => {
-                log::error!(
-                    "Failed to send the request to get RepositoryRoot: {}",
-                    base_url
-                );
-                return None;
-            }
-            Some(response) => match serde_json::from_slice::<RepositoryRoot>(response.as_slice()) {
-                Err(e) => {
-                    log::error!("Failed to parse the response for RepositoryRoot: {}", e);
-                    return None;
-                }
-                Ok(results) => {
-                    for edge in results.data.edges {
-                        if let Some(repo) = edge.node {
-                            let date_str = match &repo.createdAt {
-                                Some(date) => date.date_naive().to_string(),
-                                None => continue,
-                            };
-                            let name_str = match &repo.name {
-                                Some(name) => format!("Name: {},", name),
-                                None => String::new(),
-                            };
-                            let desc_str = match &repo.description {
-                                Some(desc) if desc.len() > 300 => {
-                                    let truncated_desc = desc.chars().take(180)
-                                    .chain(desc.chars().skip(desc.chars().count() - 80))
-                                    .collect::<String>();
-                                
-                                    format!("Description: {}", truncated_desc)
-                                }
-                                Some(desc) => format!("Description: {},", desc),
-                                None => String::new(),
-                            };
-
-                            let url_str = match &repo.url {
-                                Some(url) => format!("Url: {}", url),
-                                None => String::new(),
-                            };
-                            let stars_str = match &repo.stargazers {
-                                Some(sg) => format!("Stars: {},", sg.totalCount),
-                                None => String::new(),
-                            };
-                            let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
-
-                            out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
-                        }
-                    }
-
-                    let page_info: PageInfo = results.data.pageInfo; // Adjusted this line
-                    if let Some(has_next_page) = page_info.hasNextPage {
-                        if has_next_page {
-                            match &page_info.endCursor {
-                                Some(end_cursor) => {
-                                    cursor = Some(end_cursor.clone());
-                                    println!(
-                                        "Fetched a page, moving to next page with cursor: {}",
-                                        end_cursor
-                                    );
-                                    continue;
-                                }
-                                None => {
-                                    log::error!(
-                                        "Warning: hasNextPage is true, but endCursor is None. This might result in missing data."
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-        };
-    }
-
-    Some(out)
-} */
-
-pub async fn search_discussion(search_query: &str) -> Option<String> {
-    #[derive(Debug, Deserialize)]
-    struct Discussion {
-        title: Option<String>,
-        url: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
-        upvoteCount: Option<i32>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct DiscussionNode {
-        node: Option<Discussion>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct DiscussionEdge {
-        edges: Vec<DiscussionNode>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct DiscussionSearch {
-        search: DiscussionEdge,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct DiscussionRoot {
-        data: DiscussionSearch,
-    }
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let base_url = "https://api.github.com/graphql";
-    let mut out = String::from("DISCUSSION: \n");
-
-    let query = format!(
-        r#"
-        query {{
-            search(query: "{search_query}", type: DISCUSSION, first: 100) {{
-                edges {{
-                    node {{
-                        ... on Discussion {{
-                            title
-                            url
-                            createdAt
-                            upvoteCount
-                        }}
-                    }}
-                }}
-            }}
-        }}
-        "#
-    );
-
-    match github_http_post(&github_token, base_url, &query).await {
-        None => {
-            log::error!(
-                "Failed to send the request to get DiscussionRoot: {}",
-                base_url
-            );
-            return None;
         }
-        Some(response) => match serde_json::from_slice::<DiscussionRoot>(response.as_slice()) {
-            Err(e) => {
-                log::error!("Failed to parse the response for DiscussionRoot: {}", e);
-                return None;
-            }
-            Ok(results) => {
-                for edge in results.data.search.edges {
-                    if let Some(discussion) = edge.node {
-                        let date = match discussion.createdAt {
-                            Some(date) => date.date_naive(),
-                            None => continue,
-                        };
-
-                        let temp = format!(
-                            "Title: {}, Url: {}, Created At: {}, Upvotes: {}",
-                            discussion.title.as_deref().unwrap_or(""),
-                            discussion.url.as_deref().unwrap_or(""),
-                            date,
-                            discussion.upvoteCount.unwrap_or(0),
-                        );
-                        out.push_str(&temp);
-                    }
-                }
-            }
-        },
-    };
+    }
 
     Some(out)
 }
-
-
-/* pub async fn search_repository(search_query: &str) -> Option<String> {
-    use std::collections::HashMap;
-
-    #[derive(Debug, Deserialize)]
-    struct Payload {
-        data: Option<Data>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct Data {
-        search: Option<Search>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct Search {
-        edges: Option<Vec<Option<Edge>>>,
-        pageInfo: Option<PageInfo>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct Edge {
-        node: Option<Node>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct Node {
-        name: Option<String>,
-        description: Option<String>,
-        url: Option<String>,
-        createdAt: Option<String>,
-        stargazers: Option<Stargazers>,
-        forkCount: Option<u32>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct Stargazers {
-        totalCount: Option<u32>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct PageInfo {
-        endCursor: Option<String>,
-        hasNextPage: Option<bool>,
-    }
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let base_url = "https://api.github.com/graphql";
-    let mut out = String::from("REPOSITORY \n");
-
-    let mut cursor = None;
-
-    loop {
-        let query = format!(
-            r#"
-                query {{
-                    search(query: "{search_query}", type: REPOSITORY, first: 100{after}) {{
-                        edges {{
-                            node {{
-                                ... on Repository {{
-                                    name
-                                    description
-                                    url
-                                    createdAt
-                                    stargazers {{
-                                      totalCount
-                                    }}
-                                    forkCount
-                                }}
-                            }}
-                        }}
-                        pageInfo {{
-                            endCursor
-                            hasNextPage
-                        }}
-                    }}
-                }}
-            "#,
-            search_query = search_query,
-            after = cursor
-                .as_ref()
-                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
-        );
-
-        match github_http_post(&github_token, base_url, &query).await {
-            None => {
-                log::error!(
-                    "Failed to send the request to get RepositoryRoot: {}",
-                    base_url
-                );
-                return None;
-            }
-            Some(response) => {
-                let payload: Payload = serde_json::from_slice(&response).unwrap();
-                let mut out = String::new();
-            
-                if let Some(data) = &payload.data {
-                    if let Some(search) = &data.search {
-                        if let Some(edges) = &search.edges {
-                            for edge_option in edges {
-                                if let Some(edge) = edge_option {
-                                    if let Some(repo) = &edge.node {
-                                        
-                                        let date_str = match &repo.createdAt {
-                                            Some(date) => date.to_string(),
-                                            None => continue,
-                                        };
-                                        
-                                        let name_str = match &repo.name {
-                                            Some(name) => format!("Name: {},", name),
-                                            None => String::new(),
-                                        };
-            
-                                        let desc_str = match &repo.description {
-                                            Some(desc) if desc.len() > 300 => {
-                                                let truncated_desc = desc.chars().take(180)
-                                                .chain(desc.chars().skip(desc.chars().count() - 80))
-                                                .collect::<String>();
-                                            
-                                                format!("Description: {}", truncated_desc)
-                                            }
-                                            Some(desc) => format!("Description: {},", desc),
-                                            None => String::new(),
-                                        };
-            
-                                        let url_str = match &repo.url {
-                                            Some(url) => format!("Url: {}", url),
-                                            None => String::new(),
-                                        };
-            
-                                        let stars_str = match &repo.stargazers {
-                                            Some(sg) => format!("Stars: {},", sg.totalCount.unwrap_or(0)),
-                                            None => String::new(),
-                                        };
-            
-                                        let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
-            
-                                        out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(page_info) = &search.pageInfo {
-                            println!("Has Next Page: {:?}", page_info.hasNextPage);
-                        }
-                    }
-                }
-
-
-            },
-        };
-    }
-
-    Some(out)
-} */
 
 pub async fn search_repository(search_query: &str) -> Option<String> {
     use std::collections::HashMap;
@@ -952,7 +562,7 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
         name: Option<String>,
         description: Option<String>,
         url: Option<String>,
-        createdAt: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
         stargazers: Option<Stargazers>,
         forkCount: Option<u32>,
     }
@@ -1014,50 +624,196 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
                 );
                 return None;
             }
-            Some(response) => {
-                let payload: Payload = serde_json::from_slice(&response).unwrap();
+            Some(response) => match serde_json::from_slice::<Payload>(response.as_slice()) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for RepositoryRoot: {}", e);
+                    return None;
+                }
+                Ok(payload) => {
+                    if let Some(data) = &payload.data {
+                        if let Some(search) = &data.search {
+                            if let Some(edges) = &search.edges {
+                                for edge_option in edges {
+                                    if let Some(edge) = edge_option {
+                                        if let Some(repo) = &edge.node {
+                                            let date_str = match &repo.createdAt {
+                                                Some(date) => date.date_naive().to_string(),
+                                                None => continue,
+                                            };
 
-                if let Some(data) = &payload.data {
-                    if let Some(search) = &data.search {
+                                            let name_str = match &repo.name {
+                                                Some(name) => format!("Name: {name},"),
+                                                None => String::new(),
+                                            };
+
+                                            let desc_str = match &repo.description {
+                                                Some(desc) if desc.len() > 300 => {
+                                                    let truncated_desc = desc
+                                                        .chars()
+                                                        .take(180)
+                                                        .chain(
+                                                            desc.chars()
+                                                                .skip(desc.chars().count() - 120),
+                                                        )
+                                                        .collect::<String>();
+
+                                                    format!("Description: {truncated_desc}")
+                                                }
+                                                Some(desc) => format!("Description: {desc},"),
+                                                None => String::new(),
+                                            };
+
+                                            let url_str = match &repo.url {
+                                                Some(url) => format!("Url: {url}"),
+                                                None => String::new(),
+                                            };
+
+                                            let stars_str = match &repo.stargazers {
+                                                Some(sg) => format!(
+                                                    "Stars: {},",
+                                                    sg.totalCount.unwrap_or(0)
+                                                ),
+                                                None => String::new(),
+                                            };
+
+                                            let forks_str = match &repo.forkCount {
+                                                Some(forkCount) => format!("Forks: {forkCount}"),
+                                                None => String::new(),
+                                            };
+
+                                            out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(page_info) = &search.pageInfo {
+                                if page_info.hasNextPage.unwrap_or(false) {
+                                    cursor = page_info.endCursor.clone();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        };
+    }
+
+    Some(out)
+}
+
+pub async fn search_discussion(search_query: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct DiscussionRoot {
+        data: Option<DiscussionData>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionData {
+        search: Option<DiscussionSearch>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionSearch {
+        edges: Option<Vec<Option<DiscussionNode>>>,
+        pageInfo: Option<PageInfo>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PageInfo {
+        hasNextPage: Option<bool>,
+        endCursor: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DiscussionNode {
+        node: Option<Discussion>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Discussion {
+        title: Option<String>,
+        url: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+        upvoteCount: Option<i32>,
+    }
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("DISCUSSION: \n");
+
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let query = format!(
+            r#"
+            query {{
+                search(query: "{search_query}", type: DISCUSSION, first: 100{after}) {{
+                    edges {{
+                        node {{
+                            ... on Discussion {{
+                                title
+                                url
+                                createdAt
+                                upvoteCount
+                            }}
+                        }}
+                    }}
+                    pageInfo {{
+                        hasNextPage
+                        endCursor
+                    }}
+                }}
+            }}
+            "#,
+            search_query = search_query,
+            after = cursor
+                .as_ref()
+                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
+        );
+
+        match github_http_post(&github_token, base_url, &query).await {
+            None => {
+                log::error!(
+                    "Failed to send the request to get DiscussionRoot: {}",
+                    base_url
+                );
+                return None;
+            }
+            Some(response) => match serde_json::from_slice::<DiscussionRoot>(response.as_slice()) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for DiscussionRoot: {}", e);
+                    return None;
+                }
+                Ok(results) => {
+                    if let Some(search) = &results.data?.search {
                         if let Some(edges) = &search.edges {
                             for edge_option in edges {
-                                if let Some(edge) = edge_option {
-                                    if let Some(repo) = &edge.node {
-                                        let date_str = match &repo.createdAt {
-                                            Some(date) => date.to_string(),
+                                if let Some(discussion_node) = edge_option {
+                                    if let Some(discussion) = &discussion_node.node {
+                                        let date = match &discussion.createdAt {
+                                            Some(date) => date.date_naive().to_string(),
                                             None => continue,
                                         };
 
-                                        let name_str = match &repo.name {
-                                            Some(name) => format!("Name: {},", name),
+                                        let title_str = match &discussion.title {
+                                            Some(title) => format!("Title: {},", title),
                                             None => String::new(),
                                         };
 
-                                        let desc_str = match &repo.description {
-                                            Some(desc) if desc.len() > 300 => {
-                                                let truncated_desc = desc.chars().take(180)
-                                                .chain(desc.chars().skip(desc.chars().count() - 80))
-                                                .collect::<String>();
-                                            
-                                                format!("Description: {}", truncated_desc)
-                                            }
-                                            Some(desc) => format!("Description: {},", desc),
+                                        let url_str = match &discussion.url {
+                                            Some(u) => format!("Url: {}", u),
                                             None => String::new(),
                                         };
 
-                                        let url_str = match &repo.url {
-                                            Some(url) => format!("Url: {}", url),
+                                        let upvotes_str = match discussion.upvoteCount {
+                                            Some(count) => format!("Upvotes: {}", count),
                                             None => String::new(),
                                         };
 
-                                        let stars_str = match &repo.stargazers {
-                                            Some(sg) => format!("Stars: {},", sg.totalCount.unwrap_or(0)),
-                                            None => String::new(),
-                                        };
-
-                                        let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
-
-                                        out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
+                                        out.push_str(&format!(
+                                            "{title_str} {url_str} Created At: {date} {upvotes_str}\n"
+                                        ));
                                     }
                                 }
                             }
@@ -1074,6 +830,149 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
             },
         };
     }
+
+    Some(out)
+}
+
+pub async fn search_users(search_query: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct User {
+        name: Option<String>,
+        login: Option<String>,
+        url: Option<String>,
+        twitterUsername: Option<String>,
+        bio: Option<String>,
+        company: Option<String>,
+        location: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+        email: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UserNode {
+        node: Option<User>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UserEdge {
+        edges: Option<Vec<Option<UserNode>>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UserSearch {
+        search: Option<UserEdge>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UserRoot {
+        data: Option<UserSearch>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("USERS: \n");
+
+    let query = format!(
+        r#"
+        query {{
+            search(query: "{search_query}", type: USER, first: 100) {{
+                edges {{
+                    node {{
+                        ... on User {{
+                            name
+                            login
+                            url
+                            twitterUsername
+                            bio
+                            company
+                            location
+                            createdAt
+                            email
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        "#,
+        search_query = search_query,
+    );
+
+    match github_http_post(&github_token, base_url, &query).await {
+        None => {
+            log::error!("Failed to send the request to get UserRoot: {}", base_url);
+            return None;
+        }
+        Some(res) => match serde_json::from_slice::<UserRoot>(res.as_slice()) {
+            Err(e) => {
+                log::error!("Failed to parse the response for UserRoot: {}", e);
+                return None;
+            }
+            Ok(results) => {
+                if let Some(search) = &results.data {
+                    if let Some(edges) = &search.search {
+                        for edge_option in edges.edges.as_ref().unwrap_or(&vec![]) {
+                            if let Some(edge) = edge_option {
+                                if let Some(user) = &edge.node {
+                                    let login_str = match &user.login {
+                                        Some(login) => format!("Login: {},", login),
+                                        None => continue,
+                                    };
+                                    let name_str = match &user.name {
+                                        Some(name) => format!("Name: {},", name),
+                                        None => String::new(),
+                                    };
+
+                                    let url_str = match &user.url {
+                                        Some(url) => format!("Url: {},", url),
+                                        None => String::new(),
+                                    };
+
+                                    let twitter_str = match &user.twitterUsername {
+                                        Some(twitter) => format!("Twitter: {},", twitter),
+                                        None => String::new(),
+                                    };
+
+                                    let bio_str = match &user.bio {
+                                        Some(bio) => format!("Bio: {},", bio),
+                                        None => String::new(),
+                                    };
+
+                                    let company_str = match &user.company {
+                                        Some(company) => format!("Company: {},", company),
+                                        None => String::new(),
+                                    };
+
+                                    let location_str = match &user.location {
+                                        Some(location) => format!("Location: {},", location),
+                                        None => String::new(),
+                                    };
+
+                                    let date_str = match &user.createdAt {
+                                        Some(date) => {
+                                            format!(
+                                                "Created At: {},",
+                                                date.date_naive().to_string()
+                                            )
+                                        }
+                                        None => String::new(),
+                                    };
+
+                                    let email_str = match &user.email {
+                                        Some(email) => format!("Email: {}", email),
+                                        None => String::new(),
+                                    };
+
+                                    out.push_str(&format!(
+                                        "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    };
 
     Some(out)
 }

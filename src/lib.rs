@@ -71,8 +71,8 @@ async fn register_commands(discord_token: &str) -> bool {
         ]
     });
 
-    let command_search_mention = serde_json::json!({
-        "name": "search_mention",
+    let command_search = serde_json::json!({
+        "name": "search",
         "description": "Search for mentions in issues",
         "options": [
             {
@@ -106,11 +106,7 @@ async fn register_commands(discord_token: &str) -> bool {
     // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
     let guild_id = env::var("discord_guild_id").unwrap_or("1128056245765558364".to_string());
     let guild_id = guild_id.parse::<u64>().unwrap_or(1128056245765558364);
-    let commands = serde_json::json!([
-        command_get_user_repos,
-        command_save_user,
-        command_search_mention,
-    ]);
+    let commands = serde_json::json!([command_get_user_repos, command_save_user, command_search,]);
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
@@ -224,7 +220,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         Err(_e) => log::error!("error sending get_user_repos message: {:?}", _e),
                     }
                 }
-                "search_mention" => {
+                "search" => {
                     let options = &ac.data.options;
 
                     let search_query = match options
@@ -255,13 +251,19 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             search_result =
                                 search_issue(search_query).await.unwrap_or("".to_string())
                         }
-                        "repository" => {
+                        "users" => {
                             search_result =
-                                search_repository(search_query).await.unwrap_or("".to_string())
+                                search_users(search_query).await.unwrap_or("".to_string())
+                        }
+                        "repository" => {
+                            search_result = search_repository(search_query)
+                                .await
+                                .unwrap_or("".to_string())
                         }
                         "discussion" => {
-                            search_result =
-                                search_issue(search_query).await.unwrap_or("".to_string())
+                            search_result = search_discussion(search_query)
+                                .await
+                                .unwrap_or("".to_string())
                         }
                         _ => unreachable!("invalid search_type"),
                     }
@@ -276,7 +278,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await
                     {
                         Ok(_) => {}
-                        Err(_e) => log::error!("error sending search_mention message: {:?}", _e),
+                        Err(_e) => log::error!("error sending search message: {:?}", _e),
                     }
                 }
                 _ => {}
