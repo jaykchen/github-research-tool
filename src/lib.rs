@@ -257,7 +257,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         }
                         "repository" => {
                             search_result =
-                                search_issue(search_query).await.unwrap_or("".to_string())
+                                search_repository(search_query).await.unwrap_or("".to_string())
                         }
                         "discussion" => {
                             search_result =

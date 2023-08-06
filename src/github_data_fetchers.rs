@@ -523,7 +523,7 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
     Some(out)
 }
 
-pub async fn search_repository(search_query: &str) -> Option<String> {
+/* pub async fn search_repository(search_query: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
     struct StarGazers {
         totalCount: i32,
@@ -676,7 +676,7 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
     }
 
     Some(out)
-}
+} */
 
 pub async fn search_discussion(search_query: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
@@ -764,6 +764,316 @@ pub async fn search_discussion(search_query: &str) -> Option<String> {
             }
         },
     };
+
+    Some(out)
+}
+
+
+/* pub async fn search_repository(search_query: &str) -> Option<String> {
+    use std::collections::HashMap;
+
+    #[derive(Debug, Deserialize)]
+    struct Payload {
+        data: Option<Data>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct Data {
+        search: Option<Search>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct Search {
+        edges: Option<Vec<Option<Edge>>>,
+        pageInfo: Option<PageInfo>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct Edge {
+        node: Option<Node>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct Node {
+        name: Option<String>,
+        description: Option<String>,
+        url: Option<String>,
+        createdAt: Option<String>,
+        stargazers: Option<Stargazers>,
+        forkCount: Option<u32>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct Stargazers {
+        totalCount: Option<u32>,
+    }
+    
+    #[derive(Debug, Deserialize)]
+    struct PageInfo {
+        endCursor: Option<String>,
+        hasNextPage: Option<bool>,
+    }
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("REPOSITORY \n");
+
+    let mut cursor = None;
+
+    loop {
+        let query = format!(
+            r#"
+                query {{
+                    search(query: "{search_query}", type: REPOSITORY, first: 100{after}) {{
+                        edges {{
+                            node {{
+                                ... on Repository {{
+                                    name
+                                    description
+                                    url
+                                    createdAt
+                                    stargazers {{
+                                      totalCount
+                                    }}
+                                    forkCount
+                                }}
+                            }}
+                        }}
+                        pageInfo {{
+                            endCursor
+                            hasNextPage
+                        }}
+                    }}
+                }}
+            "#,
+            search_query = search_query,
+            after = cursor
+                .as_ref()
+                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
+        );
+
+        match github_http_post(&github_token, base_url, &query).await {
+            None => {
+                log::error!(
+                    "Failed to send the request to get RepositoryRoot: {}",
+                    base_url
+                );
+                return None;
+            }
+            Some(response) => {
+                let payload: Payload = serde_json::from_slice(&response).unwrap();
+                let mut out = String::new();
+            
+                if let Some(data) = &payload.data {
+                    if let Some(search) = &data.search {
+                        if let Some(edges) = &search.edges {
+                            for edge_option in edges {
+                                if let Some(edge) = edge_option {
+                                    if let Some(repo) = &edge.node {
+                                        
+                                        let date_str = match &repo.createdAt {
+                                            Some(date) => date.to_string(),
+                                            None => continue,
+                                        };
+                                        
+                                        let name_str = match &repo.name {
+                                            Some(name) => format!("Name: {},", name),
+                                            None => String::new(),
+                                        };
+            
+                                        let desc_str = match &repo.description {
+                                            Some(desc) if desc.len() > 300 => {
+                                                let truncated_desc = desc.chars().take(180)
+                                                .chain(desc.chars().skip(desc.chars().count() - 80))
+                                                .collect::<String>();
+                                            
+                                                format!("Description: {}", truncated_desc)
+                                            }
+                                            Some(desc) => format!("Description: {},", desc),
+                                            None => String::new(),
+                                        };
+            
+                                        let url_str = match &repo.url {
+                                            Some(url) => format!("Url: {}", url),
+                                            None => String::new(),
+                                        };
+            
+                                        let stars_str = match &repo.stargazers {
+                                            Some(sg) => format!("Stars: {},", sg.totalCount.unwrap_or(0)),
+                                            None => String::new(),
+                                        };
+            
+                                        let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
+            
+                                        out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(page_info) = &search.pageInfo {
+                            println!("Has Next Page: {:?}", page_info.hasNextPage);
+                        }
+                    }
+                }
+
+
+            },
+        };
+    }
+
+    Some(out)
+} */
+
+pub async fn search_repository(search_query: &str) -> Option<String> {
+    use std::collections::HashMap;
+
+    #[derive(Debug, Deserialize)]
+    struct Payload {
+        data: Option<Data>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Data {
+        search: Option<Search>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Search {
+        edges: Option<Vec<Option<Edge>>>,
+        pageInfo: Option<PageInfo>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Edge {
+        node: Option<Node>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Node {
+        name: Option<String>,
+        description: Option<String>,
+        url: Option<String>,
+        createdAt: Option<String>,
+        stargazers: Option<Stargazers>,
+        forkCount: Option<u32>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Stargazers {
+        totalCount: Option<u32>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PageInfo {
+        endCursor: Option<String>,
+        hasNextPage: Option<bool>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("REPOSITORY \n");
+
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let query = format!(
+            r#"
+                query {{
+                    search(query: "{search_query}", type: REPOSITORY, first: 100{after}) {{
+                        edges {{
+                            node {{
+                                ... on Repository {{
+                                    name
+                                    description
+                                    url
+                                    createdAt
+                                    stargazers {{
+                                      totalCount
+                                    }}
+                                    forkCount
+                                }}
+                            }}
+                        }}
+                        pageInfo {{
+                            endCursor
+                            hasNextPage
+                        }}
+                    }}
+                }}
+            "#,
+            search_query = search_query,
+            after = cursor
+                .as_ref()
+                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
+        );
+
+        match github_http_post(&github_token, base_url, &query).await {
+            None => {
+                log::error!(
+                    "Failed to send the request to get RepositoryRoot: {}",
+                    base_url
+                );
+                return None;
+            }
+            Some(response) => {
+                let payload: Payload = serde_json::from_slice(&response).unwrap();
+
+                if let Some(data) = &payload.data {
+                    if let Some(search) = &data.search {
+                        if let Some(edges) = &search.edges {
+                            for edge_option in edges {
+                                if let Some(edge) = edge_option {
+                                    if let Some(repo) = &edge.node {
+                                        let date_str = match &repo.createdAt {
+                                            Some(date) => date.to_string(),
+                                            None => continue,
+                                        };
+
+                                        let name_str = match &repo.name {
+                                            Some(name) => format!("Name: {},", name),
+                                            None => String::new(),
+                                        };
+
+                                        let desc_str = match &repo.description {
+                                            Some(desc) if desc.len() > 300 => {
+                                                let truncated_desc = desc.chars().take(180)
+                                                .chain(desc.chars().skip(desc.chars().count() - 80))
+                                                .collect::<String>();
+                                            
+                                                format!("Description: {}", truncated_desc)
+                                            }
+                                            Some(desc) => format!("Description: {},", desc),
+                                            None => String::new(),
+                                        };
+
+                                        let url_str = match &repo.url {
+                                            Some(url) => format!("Url: {}", url),
+                                            None => String::new(),
+                                        };
+
+                                        let stars_str = match &repo.stargazers {
+                                            Some(sg) => format!("Stars: {},", sg.totalCount.unwrap_or(0)),
+                                            None => String::new(),
+                                        };
+
+                                        let forks_str = format!("Forks: {},", repo.forkCount.unwrap_or(0));
+
+                                        out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(page_info) = &search.pageInfo {
+                            if page_info.hasNextPage.unwrap_or(false) {
+                                cursor = page_info.endCursor.clone();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            },
+        };
+    }
 
     Some(out)
 }
