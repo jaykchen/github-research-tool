@@ -3,6 +3,7 @@ pub mod github_data_fetchers;
 pub mod octocrab_compat;
 pub mod reports;
 pub mod utils;
+use reports::*;
 use data_analyzers::*;
 use discord_flows::{
     http::HttpBuilder,
@@ -50,6 +51,37 @@ pub async fn run() {
 }
 
 async fn register_commands(discord_token: &str) -> bool {
+    let command_weekly_report = serde_json::json!({
+        "name": "weekly_report",
+        "description": "Generate a weekly report",
+        "options": [
+            {
+                "name": "owner",
+                "description": "The owner of the repository",
+                "type": 3, // type 3 indicates a STRING
+                "required": true
+            },
+            {
+                "name": "repo",
+                "description": "The repository name",
+                "type": 3,
+                "required": true
+            },
+            {
+                "name": "user_name",
+                "description": "The username for report generation",
+                "type": 3,
+                "required": false
+            },
+            {
+                "name": "key",
+                "description": "Optional key for contributors",
+                "type": 3,
+                "required": false
+            }
+        ]
+    });
+
     let command_get_user_repos = serde_json::json!({
         "name": "get_user_repos",
         "description": "Get user's top repos by programming lanugage",
@@ -104,7 +136,12 @@ async fn register_commands(discord_token: &str) -> bool {
     // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
     let guild_id = env::var("discord_guild_id").unwrap_or("1128056245765558364".to_string());
     let guild_id = guild_id.parse::<u64>().unwrap_or(1128056245765558364);
-    let commands = serde_json::json!([command_get_user_repos, command_save_user, command_search,]);
+    let commands = serde_json::json!([
+        command_weekly_report,
+        command_get_user_repos,
+        command_save_user,
+        command_search,
+    ]);
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
@@ -144,6 +181,56 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 .await;
             client.set_application_id(ac.application_id.into());
             match ac.data.name.as_str() {
+                "weekly_report" => {
+                    let options = &ac.data.options;
+
+                    let owner = match options
+                        .get(0)
+                        .expect("Expected owner option")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected owner object")
+                    {
+                        CommandDataOptionValue::String(s) => s,
+                        _ => panic!("Expected string for owner"),
+                    };
+
+                    let repo = match options
+                        .get(1)
+                        .expect("Expected repo option")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected repo object")
+                    {
+                        CommandDataOptionValue::String(s) => s,
+                        _ => panic!("Expected string for repo"),
+                    };
+
+                    let user_name = options.get(2).and_then(|opt| match &opt.resolved {
+                        Some(CommandDataOptionValue::String(s)) => Some(s.as_str()),
+                        _ => None,
+                    });
+
+                    let key = options.get(3).and_then(|opt| match &opt.resolved {
+                        Some(CommandDataOptionValue::String(s)) => Some(s.as_str()),
+                        _ => None,
+                    });
+
+                    let report = weekly_report(owner, repo, user_name, key).await;
+
+                    let resp_content = report.unwrap_or("Failed to generate report.".to_string());
+                    let resp = serde_json::json!({
+                        "content": resp_content.to_string()
+                    });
+
+                    match client
+                        .edit_original_interaction_response(&ac.token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending weekly_report message: {:?}", _e),
+                    }
+                }
                 "save_user" => {
                     let options = ac
                         .data
