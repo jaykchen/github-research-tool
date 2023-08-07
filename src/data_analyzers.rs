@@ -114,6 +114,12 @@ pub async fn correlate_user_and_home_project(
     repos_data: &str,
     discussion_data: &str,
 ) -> Option<String> {
+    let home_repo_data = home_repo_data.chars().take(6000).collect::<String>();
+    let user_profile = user_profile.chars().take(4000).collect::<String>();
+    let issues_data = issues_data.chars().take(9000).collect::<String>();
+    let repos_data = repos_data.chars().take(6000).collect::<String>();
+    let discussion_data = discussion_data.chars().take(4000).collect::<String>();
+
     let sys_prompt_1 = &format!("First, let's analyze and understand the provided Github data in a step-by-step manner. Begin by evaluating the user's activity based on their most active repositories, languages used, issues they're involved in, and discussions they've participated in. Concurrently, grasp the characteristics and requirements of the home project. Your aim is to identify overlaps or connections between the user's skills or activities and the home project's needs.");
 
     let usr_prompt_1 = &format!("Using a structured approach, analyze the given data: User Profile: {} Active Repositories: {} Issues Involved: {} Discussions Participated: {} Home project's characteristics: {} Identify patterns in the user's activity and spot potential synergies with the home project. Pay special attention to the programming languages they use, especially if they align with the home project's requirements. Derive insights from their interactions and the data provided.", user_profile, repos_data, issues_data, discussion_data, home_repo_data);

@@ -44,7 +44,7 @@ pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    let _ = register_once(&discord_token).await;
+    // let _ = register_once(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
@@ -288,14 +288,13 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => panic!("Expected string for language"),
                     };
 
-                    // let user_repos = get_user_repos_in_language(username, language)
-                    //     .await
-                    //     .unwrap_or("Couldn't get any repos!".to_string());
+                    let user_repos = get_user_repos_gql(username, language)
+                        .await
+                        .unwrap_or("Couldn't get any repos!".to_string());
 
-                    // resp = serde_json::json!({
-                    //     "content": user_repos.to_string()
-                    // });
-                    // send_message_to_channel("ik8", "ch_in", user_repos.to_string()).await;
+                    resp = serde_json::json!({
+                        "content": user_repos.to_string()
+                    });
 
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)

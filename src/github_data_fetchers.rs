@@ -7,29 +7,144 @@ use serde_json;
 use std::env;
 use store_flows::{get, set};
 
-pub async fn get_user_profile(user: &str) -> Option<String> {
+pub async fn get_user_profile(user: &str) -> Option<User> {
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let user_profile_url = format!("https://api.github.com/users/{user}");
 
     match github_http_fetch(&github_token, &user_profile_url).await {
-        Some(res) => match serde_json::from_slice::<User>(res.as_slice()) {
-            Ok(u) => Some(format!("{:?}", u)),
-            Err(e) => {
-                log::error!("Error parsing User: {:?}", e);
-                None
-            }
-        },
+        Some(res) => serde_json::from_slice::<User>(res.as_slice()).ok(),
+
         None => {
             log::error!("Github user not found.");
             None
         }
     }
 }
-pub async fn get_community_profile(owner: &str, repo: &str) -> Option<String> {
+pub async fn get_user_by_login_string(login: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct User {
+        name: Option<String>,
+        login: Option<String>,
+        url: Option<String>,
+        twitterUsername: Option<String>,
+        bio: Option<String>,
+        company: Option<String>,
+        location: Option<String>,
+        createdAt: Option<DateTime<Utc>>,
+        email: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RepositoryOwner {
+        repositoryOwner: Option<User>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UserRoot {
+        data: Option<RepositoryOwner>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let base_url = "https://api.github.com/graphql";
+    let mut out = String::from("USER_profile: \n");
+
+    let query = format!(
+        r#"
+        query {{
+            repositoryOwner(login: "{login}") {{
+                ... on User {{
+                    name
+                    login
+                    url
+                    twitterUsername
+                    bio
+                    company
+                    location
+                    createdAt
+                    email
+                }}
+            }}
+        }}
+        "#
+    );
+
+    match github_http_post(&github_token, base_url, &&query).await {
+        None => {
+            log::info!("Failed to send the request to get UserRoot: {}", base_url);
+            return None;
+        }
+        Some(res) => match serde_json::from_slice::<UserRoot>(res.as_slice()) {
+            Err(e) => {
+                log::error!("Failed to parse the response for UserRoot: {}", e);
+                return None;
+            }
+            Ok(results) => {
+                if let Some(repository_owner) = &results.data {
+                    if let Some(user) = &repository_owner.repositoryOwner {
+                        let login_str = match &user.login {
+                            Some(login) => format!("Login: {},", login),
+                            None => return None,
+                        };
+
+                        let name_str = match &user.name {
+                            Some(name) => format!("Name: {},", name),
+                            None => String::new(),
+                        };
+
+                        let url_str = match &user.url {
+                            Some(url) => format!("Url: {},", url),
+                            None => String::new(),
+                        };
+
+                        let twitter_str = match &user.twitterUsername {
+                            Some(twitter) => format!("Twitter: {},", twitter),
+                            None => String::new(),
+                        };
+
+                        let bio_str = match &user.bio {
+                            Some(bio) if bio.is_empty() => String::new(),
+                            Some(bio) => format!("Bio: {},", bio),
+                            None => String::new(),
+                        };
+
+                        let company_str = match &user.company {
+                            Some(company) => format!("Company: {},", company),
+                            None => String::new(),
+                        };
+
+                        let location_str = match &user.location {
+                            Some(location) => format!("Location: {},", location),
+                            None => String::new(),
+                        };
+
+                        let date_str = match &user.createdAt {
+                            Some(date) => {
+                                format!("Created At: {},", date.date_naive().to_string())
+                            }
+                            None => String::new(),
+                        };
+
+                        let email_str = match &user.email {
+                            Some(email) => format!("Email: {}", email),
+                            None => String::new(),
+                        };
+
+                        out.push_str(&format!(
+                            "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
+                        ));
+                    }
+                }
+            }
+        },
+    };
+
+    Some(out)
+}
+pub async fn get_community_profile_string(owner: &str, repo: &str) -> Option<String> {
     #[derive(Deserialize, Debug)]
     struct CommunityProfile {
         description: String,
-        documentation: Option<String>,
+        // documentation: Option<String>,
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
@@ -39,13 +154,7 @@ pub async fn get_community_profile(owner: &str, repo: &str) -> Option<String> {
     match github_http_fetch(&github_token, &community_profile_url).await {
         Some(res) => match serde_json::from_slice::<CommunityProfile>(&res) {
             Ok(profile) => {
-                return Some(format!(
-                    "Description: {}\nDocumentation: {:?}",
-                    profile.description,
-                    profile
-                        .documentation
-                        .unwrap_or_else(|| "Not available".to_string())
-                ));
+                return Some(format!("Description: {}", profile.description));
             }
             Err(e) => log::error!("Error parsing Community Profile: {:?}", e),
         },
@@ -72,7 +181,22 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
                 let cleaned_content = readme.content.replace("\n", "");
                 match base64::decode(&cleaned_content) {
                     Ok(decoded_content) => {
-                        return Some(String::from_utf8(decoded_content).unwrap_or_default());
+                        match &String::from_utf8(decoded_content) {
+                            Ok(out) if out.len() > 3000 => {
+                                let truncated = out
+                                    .chars()
+                                    .take(1800)
+                                    .chain(out.chars().skip(out.chars().count() - 1200))
+                                    .collect::<String>();
+
+                                return Some(format!("Readme: {truncated}"));
+                            }
+                            Ok(out) => return Some(format!("Readme: {out}")),
+                            Err(_e) => {
+                                log::error!("failed to convert cleaned readme to String: {_e}");
+                                return None;
+                            }
+                        };
                     }
                     Err(_) => log::error!("Error decoding base64 content."),
                 }
@@ -454,7 +578,7 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
     );
 
     let base_url = "https://api.github.com/graphql";
-    let mut out = String::new();
+    let mut out = format!("Repos in {language}:\n");
     match github_http_post(&github_token, base_url, &query).await {
         None => log::error!("Failed to send the request to {}", base_url.to_string()),
         Some(response) => match serde_json::from_slice::<Root>(response.as_slice()) {
@@ -464,13 +588,25 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
                 repos_sorted.sort_by(|a, b| b.stargazers.totalCount.cmp(&a.stargazers.totalCount));
 
                 for repo in repos_sorted {
-                    let temp = format!(
-                        "Repo: {}, Description: {}, Stars: {}, Commits: {}",
-                        repo.name,
-                        repo.description.clone().unwrap_or_default(),
-                        repo.stargazers.totalCount,
+                    let name_str = format!("Repo: {}", repo.name);
+
+                    let description_str = match &repo.description {
+                        Some(description) => format!("Description: {},", description),
+                        None => String::new(),
+                    };
+
+                    let stars_str = match repo.stargazers.totalCount {
+                        0 => String::new(),
+                        count => format!("Stars: {count}"),
+                    };
+
+                    let commits_str = format!(
+                        "Commits: {}",
                         repo.defaultBranchRef.target.history.totalCount
                     );
+
+                    let temp = format!("{name_str} {description_str} {stars_str} {commits_str}\n");
+
                     out.push_str(&temp);
                 }
 
