@@ -1,9 +1,83 @@
 use crate::octocrab_compat::{Comment, Issue};
 use crate::utils::*;
+use chrono::{DateTime, Utc, Duration};
 use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
+pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str) -> Option<String> {
+    #[derive(Debug, Deserialize, Serialize)]
+    struct User {
+        login: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct GithubCommit {
+        sha: String,
+        html_url: String,
+        author: User,
+        committer: User,
+        commit: CommitDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitDetails {
+        author: CommitUserDetails,
+        // committer: CommitUserDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitUserDetails {
+        date: Option<DateTime<Utc>>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let user_commits_repo_str = format!(
+        "https://api.github.com/repos/{}/{}/commits?author={}",
+        owner, repo, user_name
+    );
+
+    let mut commits_summaries = String::new();
+    let now = Utc::now();
+    let a_week_ago = (now - Duration::days(7)).date_naive();
+
+    match github_http_fetch(&github_token, &user_commits_repo_str).await {
+        None => println!("Error fetching Page of commits"),
+        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
+            Err(e) => println!("Error parsing commits object: {:?}", e),
+            Ok(commits_obj) => {
+                let recent_commits: Vec<_> = commits_obj
+                    .into_iter()
+                    .filter(|commit| {
+                        if let Some(commit_date) = &commit.commit.author.date {
+                            let commit_naive_date = commit_date.date_naive();
+                            commit_naive_date > a_week_ago
+                        } else {
+                            false
+                        }
+                    })
+                    .collect();
+
+                for commit in &recent_commits {
+                    match analyze_commit(owner, repo, user_name, &commit.sha).await {
+                        Some(summary) => {
+                            commits_summaries.push_str(&summary);
+                            commits_summaries.push('\n');
+                            if commits_summaries.len() > 45_000 {
+                                break;
+                            }
+                        }
+                        None => {
+                            log::error!("Error analyzing commit {:?} for user {}", commit.sha, user_name)
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    Some(commits_summaries)
+}
 
 pub async fn process_commits(owner: &str, repo: &str, user_name: &str) -> Option<String> {
     #[derive(Debug, Deserialize, Serialize)]
@@ -17,19 +91,35 @@ pub async fn process_commits(owner: &str, repo: &str, user_name: &str) -> Option
         html_url: String,
         author: User,
         committer: User,
+        commit: CommitDetails,
     }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitDetails {
+        author: CommitUserDetails,
+        // committer: CommitUserDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitUserDetails {
+        date: Option<DateTime<Utc>>,
+    }
+
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let user_commits_repo_str =
-        format!("https://api.github.com/repos/{owner}/{repo}/commits?author={user_name}");
+    let user_commits_repo_str = format!(
+        "https://api.github.com/repos/{}/{}/commits?author={}",
+        owner, repo, user_name
+    );
+
     let mut commits_summaries = String::new();
 
     match github_http_fetch(&github_token, &user_commits_repo_str).await {
-        None => log::error!("Error fetching Page of commits"),
+        None => println!("Error fetching Page of commits"),
         Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(_e) => log::error!("Error parsing commits object: {:?}", _e),
+            Err(e) => println!("Error parsing commits object: {:?}", e),
             Ok(commits_obj) => {
-                for sha in commits_obj.into_iter().map(|commit| commit.sha) {
-                    match analyze_commit(owner, repo, user_name, &sha).await {
+                for commit in &commits_obj {
+                    match analyze_commit(owner, repo, user_name, &commit.sha).await {
                         Some(summary) => {
                             commits_summaries.push_str(&summary);
                             commits_summaries.push('\n');
@@ -37,9 +127,11 @@ pub async fn process_commits(owner: &str, repo: &str, user_name: &str) -> Option
                                 break;
                             }
                         }
-                        None => {
-                            log::error!("Error analyzing commit {:?} for user {}", sha, user_name)
-                        }
+                        None => log::error!(
+                            "Error analyzing commit {:?} for user {}",
+                            commit.sha,
+                            user_name
+                        ),
                     }
                 }
             }

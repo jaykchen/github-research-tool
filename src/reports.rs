@@ -66,7 +66,35 @@ pub async fn weekly_report(
             )
             .await;
         } else {
-            return Some("placeholder text for existing contributor".to_string());
+            let now = Utc::now();
+            let a_week_ago = now - Duration::days(7);
+            let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
+            // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
+
+            let commits_summaries = process_commits_last_week(owner, repo, user_name)
+                .await
+                .unwrap_or("failed to process_commits_last_week".to_string());
+
+            let mut issues_summaries = String::new();
+            let issues = get_user_issues_on_repo_last_n_days(owner, repo, user_name, 7)
+                .await
+                .unwrap_or(vec![]);
+
+            for issue in issues {
+                if let Some(body) = analyze_issue(owner, repo, user_name, issue).await {
+                    issues_summaries.push_str(&body);
+                    issues_summaries.push_str("\n");
+                }
+            }
+
+            let discussion_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
+            let discussion_data = search_discussion(&discussion_query)
+                .await
+                .unwrap_or("".to_string());
+            send_message_to_channel("ik8", "ch_dis", discussion_data.clone()).await;
+
+            return correlate_commits_issues(&commits_summaries, &issues_summaries).await;
         }
     }
 
