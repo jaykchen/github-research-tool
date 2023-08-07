@@ -1,7 +1,5 @@
-use crate::utils::*;
 use crate::octocrab_compat::{Comment, Issue};
-use dotenv::dotenv;
-use flowsnet_platform_sdk::logger;
+use crate::utils::*;
 use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -109,21 +107,26 @@ pub async fn correlate_commits_issues(
     .await
 }
 
-pub async fn correlate_user_and_this(_user_data: &str, _own_summary: &str) -> Option<String> {
-    let sys_prompt_1 = &format!("Your task is to analyze the Github user's activity data, which includes the most active repositories, languages used, commit count, and issue interactions on our repo. Identify any correlations between the programming languages used in the user's activities and the languages required by our project. Pay close attention to any relationships between the user's activity in their own repositories, the languages they use, and their interactions in our repo. Use this data to evaluate the user's expertise and their potential contribution to our project. Provide a concise summary in bullet-point format.");
+pub async fn correlate_user_and_home_project(
+    home_repo_data: &str,
+    user_profile: &str,
+    issues_data: &str,
+    repos_data: &str,
+    discussion_data: &str,
+) -> Option<String> {
+    let sys_prompt_1 = &format!("First, let's analyze and understand the provided Github data in a step-by-step manner. Begin by evaluating the user's activity based on their most active repositories, languages used, issues they're involved in, and discussions they've participated in. Concurrently, grasp the characteristics and requirements of the home project. Your aim is to identify overlaps or connections between the user's skills or activities and the home project's needs.");
 
-    let usr_prompt_1 = &format!("Given the user's most active repositories data: {_user_data}, the languages used, the commit count, and the interactions on our repo: {_own_summary}, analyze the user's activity and identify patterns or preferences that align with our project's requirements. Consider the repositories they're most active in, the languages they use, especially those relevant to our project, and how their interactions in our repo might reflect their understanding and proficiency in these languages. Additionally, note any instances where the user's own repositories or preferred languages directly intersect with the needs of our project.");
+    let usr_prompt_1 = &format!("Using a structured approach, analyze the given data: User Profile: {} Active Repositories: {} Issues Involved: {} Discussions Participated: {} Home project's characteristics: {} Identify patterns in the user's activity and spot potential synergies with the home project. Pay special attention to the programming languages they use, especially if they align with the home project's requirements. Derive insights from their interactions and the data provided.", user_profile, repos_data, issues_data, discussion_data, home_repo_data);
 
-    let usr_prompt_2 = &format!("Based on the analyzed Github user activity data, create a concise bullet-point summary. Highlight the user's main areas of interest, their preferred languages, especially those relevant to our project, and their most impactful interactions on our repo. Detail how their skills and expertise in these languages could potentially benefit our project. Emphasize any correlation between their personal Github activity, their understanding of required languages, and their interactions in our repo. Avoid replicating phrases from the raw data and focus on providing a unique and insightful narrative. Make sure your answer stays below 256 tokens.");
-
+    let usr_prompt_2 = &format!("Now, using the insights from your step-by-step analysis, craft a concise bullet-point summary that underscores: - The user's main areas of expertise and interest. - The relevance of their preferred languages or technologies to the home project. - Their potential contributions to the home project, based on their skills and interactions. Ensure the summary is clear, insightful, and remains under 256 tokens. Emphasize any evident alignments between the user's skills and the project's needs.");
     chain_of_chat(
         sys_prompt_1,
         usr_prompt_1,
-        "correlate-98",
+        "correlate-user-home",
         512,
         usr_prompt_2,
         256,
-        "correlate_commits_issues",
+        "correlate-user-home-summary",
     )
     .await
 }

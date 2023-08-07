@@ -1,11 +1,8 @@
 use crate::octocrab_compat::{Issue, Repository, User};
 use crate::utils::*;
-use chrono::{DateTime, Utc, Duration};
-use dotenv::dotenv;
-use flowsnet_platform_sdk::logger;
-use http_req::{request::Method, request::Request, response::Response, uri::Uri};
-use log::{self, debug};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Duration, Utc};
+use http_req::response::Response;
+use serde::Deserialize;
 use serde_json;
 use std::env;
 use store_flows::{get, set};
@@ -27,6 +24,64 @@ pub async fn get_user_profile(user: &str) -> Option<String> {
             None
         }
     }
+}
+pub async fn get_community_profile(owner: &str, repo: &str) -> Option<String> {
+    #[derive(Deserialize, Debug)]
+    struct CommunityProfile {
+        description: String,
+        documentation: Option<String>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let community_profile_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/community/profile");
+
+    match github_http_fetch(&github_token, &community_profile_url).await {
+        Some(res) => match serde_json::from_slice::<CommunityProfile>(&res) {
+            Ok(profile) => {
+                return Some(format!(
+                    "Description: {}\nDocumentation: {:?}",
+                    profile.description,
+                    profile
+                        .documentation
+                        .unwrap_or_else(|| "Not available".to_string())
+                ));
+            }
+            Err(e) => log::error!("Error parsing Community Profile: {:?}", e),
+        },
+        None => log::error!("Community profile not found for {}/{}.", owner, repo),
+    }
+    None
+}
+
+pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
+    #[derive(Deserialize, Debug)]
+    struct GithubReadme {
+        // size: usize,
+        // url: String,
+        // html_url: String,
+        content: String,
+        // encoding: String,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let readme_url = format!("https://api.github.com/repos/{owner}/{repo}/readme");
+    match github_http_fetch(&github_token, &readme_url).await {
+        Some(res) => match serde_json::from_slice::<GithubReadme>(&res) {
+            Ok(readme) => {
+                let cleaned_content = readme.content.replace("\n", "");
+                match base64::decode(&cleaned_content) {
+                    Ok(decoded_content) => {
+                        return Some(String::from_utf8(decoded_content).unwrap_or_default());
+                    }
+                    Err(_) => log::error!("Error decoding base64 content."),
+                }
+            }
+            Err(e) => log::error!("Error parsing Readme: {:?}", e),
+        },
+        None => log::error!("Github readme not found."),
+    }
+    None
 }
 
 pub async fn is_new_contributor(user_name: &str, key: &str) -> bool {
@@ -279,7 +334,7 @@ pub async fn get_user_repos_in_language(user: &str, language: &str) -> Option<Ve
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let query = format!("user:{} language:{} sort:stars", user, language); 
+    let query = format!("user:{} language:{} sort:stars", user, language);
     let encoded_query = urlencoding::encode(&query);
 
     let mut out: Vec<Repository> = vec![];
@@ -427,22 +482,22 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
 }
 
 pub async fn search_issue(search_query: &str) -> Option<String> {
-    #[derive(Debug, Deserialize,Clone)]
+    #[derive(Debug, Deserialize, Clone)]
     pub struct User {
         login: Option<String>,
     }
 
-    #[derive(Debug, Deserialize,Clone)]
+    #[derive(Debug, Deserialize, Clone)]
     struct AssigneeNode {
         node: Option<User>,
     }
 
-    #[derive(Debug, Deserialize,Clone)]
+    #[derive(Debug, Deserialize, Clone)]
     struct AssigneeEdge {
         edges: Option<Vec<Option<AssigneeNode>>>,
     }
 
-    #[derive(Debug, Deserialize,Clone)]
+    #[derive(Debug, Deserialize, Clone)]
     struct Issue {
         url: Option<String>,
         number: Option<u64>,
@@ -559,10 +614,11 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                         None => String::new(),
                                     };
 
-                                    let author_str = match issue.clone().author.and_then(|a| a.login) {
-                                        Some(auth) => format!("Author: {},", auth),
-                                        None => String::new(),
-                                    };
+                                    let author_str =
+                                        match issue.clone().author.and_then(|a| a.login) {
+                                            Some(auth) => format!("Author: {},", auth),
+                                            None => String::new(),
+                                        };
 
                                     let assignees_str = {
                                         let assignee_names = issue
@@ -667,8 +723,6 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
 }
 
 pub async fn search_repository(search_query: &str) -> Option<String> {
-    use std::collections::HashMap;
-
     #[derive(Debug, Deserialize)]
     struct Payload {
         data: Option<Data>,

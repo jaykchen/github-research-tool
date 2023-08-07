@@ -8,7 +8,6 @@
 //     Error as OctoError, Page, Result as OctoResult,
 // };
 use chrono::{DateTime, Utc};
-use http_req::uri::Uri;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

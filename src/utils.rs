@@ -1,5 +1,3 @@
-use dotenv::dotenv;
-use flowsnet_platform_sdk::logger;
 
 use http_req::{request::Method, request::Request, response, uri::Uri};
 use log;
@@ -7,10 +5,8 @@ use openai_flows::{
     chat::{ChatModel, ChatOptions},
     OpenAIFlows,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
-use std::env;
 use store_flows::{get, set};
 
 pub fn squeeze_fit_commits_issues(commits: &str, issues: &str, split: f32) -> (String, String) {
