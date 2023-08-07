@@ -390,6 +390,72 @@ pub async fn get_user_issues_on_repo_last_n_days(
         Some(out)
     }
 }
+pub async fn get_all_issues_on_repo_last_n_days(
+    owner: &str,
+    repo: &str,
+    n_days: u16,
+) -> Option<Vec<Issue>> {
+    #[derive(Debug, Deserialize)]
+    struct Page<T> {
+        pub items: Vec<T>,
+        pub total_count: Option<u64>,
+    }
+    let now = Utc::now();
+
+    let n_days_ago = now - Duration::days(n_days.into());
+    let n_days_ago_str = n_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let query = format!("repo:{owner}/{repo} updated:>{n_days_ago_str}");
+    let encoded_query = urlencoding::encode(&query);
+
+    let mut out: Vec<Issue> = vec![];
+    let mut total_pages = None;
+    let mut current_page = 1;
+    let mut count = 0;
+    loop {
+        let url_str = format!(
+            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
+        );
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
+                Err(_e) => {
+                    log::error!("Error parsing Page<Issue>: {:?}", _e);
+                    break;
+                }
+                Ok(issue_page) => {
+                    if total_pages.is_none() {
+                        if let Some(count) = issue_page.total_count {
+                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
+                        }
+                    }
+
+                    for issue in issue_page.items {
+                        out.push(issue);
+                        count += 1;
+
+                        if count > 1 {
+                            break;
+                        }
+                    }
+
+                    current_page += 1;
+                    if current_page > total_pages.unwrap_or(usize::MAX) {
+                        break;
+                    }
+                }
+            },
+            None => break,
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
 
 pub async fn get_user_issues_on_repo(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
     #[derive(Debug, Deserialize)]

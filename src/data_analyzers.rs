@@ -1,6 +1,6 @@
 use crate::octocrab_compat::{Comment, Issue};
 use crate::utils::*;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -68,7 +68,87 @@ pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str)
                             }
                         }
                         None => {
-                            log::error!("Error analyzing commit {:?} for user {}", commit.sha, user_name)
+                            log::error!(
+                                "Error analyzing commit {:?} for user {}",
+                                commit.sha,
+                                user_name
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    Some(commits_summaries)
+}
+
+pub async fn process_repo_commits_last_week(owner: &str, repo: &str) -> Option<String> {
+    #[derive(Debug, Deserialize, Serialize)]
+    struct User {
+        login: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct GithubCommit {
+        sha: String,
+        html_url: String,
+        author: User,
+        committer: User,
+        commit: CommitDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitDetails {
+        author: CommitUserDetails,
+        // committer: CommitUserDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitUserDetails {
+        date: Option<DateTime<Utc>>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let user_commits_repo_str = format!("https://api.github.com/repos/{}/{}/commits", owner, repo);
+
+    let mut commits_summaries = String::new();
+    let now = Utc::now();
+    let a_week_ago = (now - Duration::days(7)).date_naive();
+    let mut user_name = String::new();
+    match github_http_fetch(&github_token, &user_commits_repo_str).await {
+        None => println!("Error fetching Page of commits"),
+        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
+            Err(e) => println!("Error parsing commits object: {:?}", e),
+            Ok(commits_obj) => {
+                let recent_commits: Vec<_> = commits_obj
+                    .into_iter()
+                    .filter(|commit| {
+                        if let Some(commit_date) = &commit.commit.author.date {
+                            let commit_naive_date = commit_date.date_naive();
+                            commit_naive_date > a_week_ago
+                        } else {
+                            false
+                        }
+                    })
+                    .collect();
+
+                for commit in &recent_commits {
+                    user_name = commit.author.login.clone();
+                    match analyze_commit(owner, repo, &user_name, &commit.sha).await {
+                        Some(summary) => {
+                            commits_summaries.push_str(&summary);
+                            commits_summaries.push('\n');
+                            if commits_summaries.len() > 45_000 {
+                                break;
+                            }
+                        }
+                        None => {
+                            log::error!(
+                                "Error analyzing commit {:?} for user {}",
+                                commit.sha,
+                                user_name
+                            )
                         }
                     }
                 }
@@ -178,13 +258,10 @@ pub async fn correlate_commits_issues(
     let (commits_summary, issues_summary) =
         squeeze_fit_commits_issues(_commits_summary, _issues_summary, 0.6);
 
-    // let sys_prompt_1 = &format!("Your task is to examine and correlate both commit logs and issue records for a specific user within a GitHub repository. Despite potential limitations in the data, such as insufficient information or difficulties in finding correlations, focus on identifying the user's top 1-3 significant contributions to the project. Consider all aspects of their contributions, from the codebase to project documentation, and describe their evolution over time. Assess the overall impact of these contributions to the project's development. Create a unique, detailed summary that highlights the scope and significance of the user's contributions, avoiding verbatim repetition from the source data. If correlations between commit logs and issue records are limited, prioritize identifying the user's top contributions. Present your summary in a clear, bullet-point format.");
     let sys_prompt_1 = &format!("Your task is to identify the 1-3 most impactful contributions by a specific user, based on the given commit logs and issue records. Pay close attention to any sequential relationships between issues and commits, and consider how they reflect the user's growth and evolution within the project. Use this data to evaluate the user's overall influence on the project's development. Provide a concise summary in bullet-point format.");
 
-    // let usr_prompt_1 = &format!("Given the commit logs: {commits_summary} and issue records: {issues_summary}, analyze and identify the top 1-3 significant contributions made by the user to the project. Your task is to recognize the key areas of impact, be it in the codebase, project documentation, or other aspects, even in the presence of insufficient data or lack of direct correlations. Create a list of these significant contributions without directly replicating phrases from the source data. This list will be used in the next step to construct a detailed narrative of the user's journey in the project.");
     let usr_prompt_1 = &format!("Given the commit logs: {commits_summary} and issue records: {issues_summary}, identify the most significant contributions made by the user. Look for patterns and sequences of events that indicate the user's growth and how they approached problem-solving. Consider major code changes, and initiatives that had substantial impact on the project. Additionally, note any instances where the resolution of an issue led to a specific commit.");
 
-    // let usr_prompt_2 = &format!("Using the list of significant contributions identified in the previous step, create a detailed narrative that depicts the user's journey and evolution in the project. Describe the progression of these contributions over time, from their inception to their current status. Highlight the overall impact and significance of these contributions within the project's development. Your narrative should be unique and insightful, capturing the user's influence on the project. Present your findings in a clear, concise, and bullet-point format.");
     let usr_prompt_2 = &format!("Based on the contributions identified, create a concise bullet-point summary. Highlight the user's key contributions and their influence on the project. Pay attention to their growth over time, and how their responses to issues evolved. Make sure to reference any interconnected events between issues and commits. Avoid replicating phrases from the source data and focus on providing a unique and insightful narrative. Please ensure your answer stayed below 256 tokens.");
 
     chain_of_chat(
@@ -195,6 +272,32 @@ pub async fn correlate_commits_issues(
         usr_prompt_2,
         256,
         "correlate_commits_issues",
+    )
+    .await
+}
+pub async fn correlate_commits_issues_discussions(
+    _commits_summary: &str,
+    _issues_summary: &str,
+    _discussions: &str,
+) -> Option<String> {
+    // Adjusting the squeeze function to account for discussions
+    let (commits_summary, issues_summary) =
+        squeeze_fit_commits_issues(_commits_summary, _issues_summary, 0.6);
+
+    let sys_prompt_1 = &format!("Your task is to identify the 1-3 most impactful contributions by a specific user, based on the given commit logs, issue records, and discussion threads. Pay close attention to any sequential relationships among them. Consider how discussions lead to issue creations or commits and vice-versa, reflecting the user's growth and evolution within the project. Use this data to evaluate the user's overall influence on the project's development. Provide a concise summary in bullet-point format.");
+
+    let usr_prompt_1 = &format!("Given the commit logs: {commits_summary}, issue records: {issues_summary}, and discussion threads: {_discussions}, identify the most significant contributions made by the user. Look for patterns and sequences of events that indicate the user's growth and how they approached problem-solving. Consider major discussions leading to code changes, or the resolution of issues that led to specific commits or spawned further discussions.");
+
+    let usr_prompt_2 = &format!("Based on the contributions identified, create a concise bullet-point summary. Highlight top contributor's key contributions and their influence on the project using commits, issues, and discussions. Pay attention to their growth over time, and how their responses and engagements evolved. Make sure to reference any interconnected events among the three. Avoid replicating phrases from the source data and focus on providing a unique and insightful narrative. Please ensure your answer stays below 256 tokens.");
+
+    chain_of_chat(
+        sys_prompt_1,
+        usr_prompt_1,
+        "correlate-99",
+        512,
+        usr_prompt_2,
+        256,
+        "correlate_commits_issues_discussions",
     )
     .await
 }
