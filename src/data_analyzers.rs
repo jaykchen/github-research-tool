@@ -284,12 +284,17 @@ pub async fn correlate_commits_issues_discussions(
     let (commits_summary, issues_summary) =
         squeeze_fit_commits_issues(_commits_summary, _issues_summary, 0.6);
 
-    let sys_prompt_1 = &format!("Your task is to identify the 1-3 most impactful contributions by a specific user, based on the given commit logs, issue records, and discussion threads. Pay close attention to any sequential relationships among them. Consider how discussions lead to issue creations or commits and vice-versa, reflecting the user's growth and evolution within the project. Use this data to evaluate the user's overall influence on the project's development. Provide a concise summary in bullet-point format.");
+    // let sys_prompt_1 = &format!("Your task is to identify the 1-3 most impactful contributions by a specific user, based on the given commit logs, issue records, and discussion threads. Pay close attention to any sequential relationships among them. Consider how discussions lead to issue creations or commits and vice-versa, reflecting the user's growth and evolution within the project. Use this data to evaluate the user's overall influence on the project's development. Provide a concise summary in bullet-point format.");
 
-    let usr_prompt_1 = &format!("Given the commit logs: {commits_summary}, issue records: {issues_summary}, and discussion threads: {_discussions}, identify the most significant contributions made by the user. Look for patterns and sequences of events that indicate the user's growth and how they approached problem-solving. Consider major discussions leading to code changes, or the resolution of issues that led to specific commits or spawned further discussions.");
+    // let usr_prompt_1 = &format!("Given the commit logs: {commits_summary}, issue records: {issues_summary}, and discussion threads: {_discussions}, identify the most significant contributions made by the user. Look for patterns and sequences of events that indicate the user's growth and how they approached problem-solving. Consider major discussions leading to code changes, or the resolution of issues that led to specific commits or spawned further discussions.");
 
-    let usr_prompt_2 = &format!("Based on the contributions identified, create a concise bullet-point summary. Highlight top contributor's key contributions and their influence on the project using commits, issues, and discussions. Pay attention to their growth over time, and how their responses and engagements evolved. Make sure to reference any interconnected events among the three. Avoid replicating phrases from the source data and focus on providing a unique and insightful narrative. Please ensure your answer stays below 256 tokens.");
+    // let usr_prompt_2 = &format!("Based on the contributions identified, create a concise bullet-point summary. Highlight top contributor's key contributions and their influence on the project using commits, issues, and discussions. Pay attention to their growth over time, and how their responses and engagements evolved. Make sure to reference any interconnected events among the three. Avoid replicating phrases from the source data and focus on providing a unique and insightful narrative. Please ensure your answer stays below 256 tokens.");
+    let sys_prompt_1 = &format!("Analyze the given commit logs, issue records, and discussion threads to identify and quantify the impactful contributions of each individual member during the week. Focus on specific changes, improvements, or resolutions that each member contributed. Provide a bullet-point analysis for each member, emphasizing their distinct contributions and measurable impact on the project.");
 
+    let usr_prompt_1 = &format!("Given the commit logs: {commits_summary}, issue records: {issues_summary}, and discussion threads: {_discussions}, identify the contributions of each member during the week. List down the specific tasks, enhancements, or resolutions made by each individual. Ensure the focus is on concrete and impactful contributions that each member brought to the project.");
+    
+    let usr_prompt_2 = &format!("Now, synthesize the individual analyses into a cohesive summary. Describe how each member's contributions this week fit into the overall progression and objectives of the project. Focus on collaboration, interplay between different contributions, and the collective impact of the team. Mention any overarching themes or patterns observed during the week. Ensure the narrative reflects both individual efforts and their combined influence on the project's advancement. Limit your answer to 256 tokens.");
+    
     chain_of_chat(
         sys_prompt_1,
         usr_prompt_1,
@@ -406,3 +411,73 @@ pub async fn analyze_issue(owner: &str, repo: &str, user: &str, issue: Issue) ->
 
     None
 }
+
+/* pub async fn analyze_discussion(owner: &str, repo: &str, user: &str, discussion: Discussion) -> Option<String> {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let discussion_creator_name = discussion.user.login;
+    let discussion_number = discussion.number;
+    let discussion_title = discussion.title;
+    let discussion_body = match discussion.body {
+        Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+        None => "".to_string(),
+    };
+    let discussion_date = discussion.created_at.date_naive().to_string();
+    let html_url = discussion.html_url.to_string();
+
+    let mut all_text_from_discussion = format!("User '{discussion_creator_name}', has started a discussion titled '{discussion_title}', with the opening post: '{discussion_body}'.");
+
+    let url_str = format!(
+        "https://api.github.com/repos/{owner}/{repo}/discussions/{discussion_number}/comments?per_page=100",
+    );
+
+    match github_http_fetch(&github_token, &url_str).await {
+        Some(res) => match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
+            Err(_e) => log::error!("Error parsing Vec<Comment>: {:?}", _e),
+            Ok(comments_obj) => {
+                for comment in comments_obj {
+                    let comment_body = match comment.body {
+                        Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+                        None => "".to_string(),
+                    };
+                    let commenter = comment.user.login;
+                    let commenter_input = format!("{commenter} commented: {comment_body}");
+                    all_text_from_discussion.push_str(&commenter_input);
+
+                    if all_text_from_discussion.len() > 45_000 {
+                        break;
+                    }
+                }
+            }
+        },
+        None => {}
+    };
+
+    let sys_prompt_1 = &format!("Given the information that user '{discussion_creator_name}' opened a discussion titled '{discussion_title}', your task is to analyze the content of the discussion posts. Extract key points, topics discussed, any problems or questions raised, significant contributions from participants, and any identified conclusions or action items.");
+
+    let usr_prompt_1 = &format!("Based on the GitHub discussion posts: {all_text_from_discussion}, please extract: Main topics or points discussed. Any questions or problems raised. Key contributions or points of view shared by participants. Significant contributions by user '{user}'. Identified conclusions or action items. The role and contribution of the user '{user}' in the discussion.");
+
+    let usr_prompt_2 = &format!("Provide a concise summary emphasizing the overarching contribution made by '{user}' in the discussion and the core themes addressed, ensuring your response is under 128 tokens.");
+
+    match chain_of_chat(
+        sys_prompt_1,
+        usr_prompt_1,
+        &format!("discussion_{discussion_number}"),
+        256,
+        usr_prompt_2,
+        128,
+        &format!("Error generating discussion summary #{discussion_number}"),
+    )
+    .await
+    {
+        Some(discussion_summary) => {
+            let mut out = html_url.to_string();
+            out.push(' ');
+            out.push_str(&discussion_summary);
+            return Some(out);
+        }
+        None => {}
+    }
+
+    None
+} */
