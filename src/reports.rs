@@ -128,6 +128,7 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
     let commits_summaries = process_repo_commits_last_week(owner, repo)
         .await
         .unwrap_or("failed to process_commits_last_week".to_string());
+    send_message_to_channel("ik8", "ch_rep", commits_summaries.clone()).await;
 
     let mut issues_summaries = String::new();
     let issues = get_all_issues_on_repo_last_n_days(owner, repo, 7)
@@ -141,6 +142,7 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
             issues_summaries.push_str("\n");
         }
     }
+    send_message_to_channel("ik8", "ch_iss", issues_summaries.clone()).await;
 
     let discussion_query = format!("updated:>{a_week_ago_str}");
     let discussion_data = search_discussion(&discussion_query)
