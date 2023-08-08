@@ -94,9 +94,9 @@ pub async fn current_contributor_report(
     // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
 
-    let commits_summaries = process_commits_in_range(owner, repo, Some(user_name), 7)
+    let (commits_summaries, commits_count) = process_commits_in_range(owner, repo, Some(user_name), 7)
         .await
-        .unwrap_or("failed to process_commits_last_week".to_string());
+        .unwrap_or_default();
 
     let mut issues_summaries = String::new();
     let issues = get_user_issues_on_repo_last_n_days(owner, repo, user_name, 7)
@@ -125,9 +125,9 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
     // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
 
-    let commits_summaries = process_commits_in_range(owner, repo, None, 7)
+    let (commits_summaries, commits_count) = process_commits_in_range(owner, repo, None, 7)
         .await
-        .unwrap_or("failed to process_commits_last_week".to_string());
+        .unwrap_or_default();
     send_message_to_channel("ik8", "ch_rep", commits_summaries.clone()).await;
 
     let mut issues_summaries = String::new();

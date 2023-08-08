@@ -3,10 +3,10 @@ pub mod github_data_fetchers;
 pub mod octocrab_compat;
 pub mod reports;
 pub mod utils;
-use reports::*;
+use chrono::{Duration, Utc};
 use data_analyzers::*;
 use discord_flows::{
-    http::HttpBuilder,
+    http::{Http, HttpBuilder},
     model::{
         application_command::CommandDataOptionValue, channel, guild, interaction, Interaction,
     },
@@ -15,13 +15,13 @@ use discord_flows::{
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
+use reports::*;
 use serde_json;
 use slack_flows::send_message_to_channel;
 use std::env;
+use std::sync::Mutex;
 use store_flows::{get, set};
 use utils::*;
-
-use std::sync::Mutex;
 
 static REGISTERED: Mutex<Option<bool>> = Mutex::new(None);
 
@@ -44,7 +44,7 @@ pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    // let _ = register_once(&discord_token).await;
+    let _ = register_once(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
@@ -72,13 +72,8 @@ async fn register_commands(discord_token: &str) -> bool {
                 "description": "The username for report generation",
                 "type": 3,
                 "required": false
-            },
-            {
-                "name": "key",
-                "description": "Optional key for contributors",
-                "type": 3,
-                "required": false
             }
+
         ]
     });
 
@@ -211,14 +206,56 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => None,
                     });
 
-                    let key = options.get(3).and_then(|opt| match &opt.resolved {
-                        Some(CommandDataOptionValue::String(s)) => Some(s.as_str()),
-                        _ => None,
+                    // let report = weekly_report(owner, repo, user_name, key).await;
+                    let now = Utc::now();
+                    let a_week_ago = now - Duration::days(7);
+                    let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+                    let (commits_summaries, commits_count) =
+                        process_commits_in_range(owner, repo, user_name, 7)
+                            .await
+                            .unwrap_or_default();
+
+                    let resp = serde_json::json!({
+                        "content": format!("{} commits processed", commits_count)
                     });
+                    match client
+                        .edit_original_interaction_response(&ac.token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending weekly_report message: {:?}", _e),
+                    }
 
-                    let report = weekly_report(owner, repo, user_name, key).await;
+                    let mut issues_summaries = String::new();
+                    let issues =
+                        get_user_issues_on_repo_last_n_days(owner, repo, user_name.unwrap(), 7)
+                            .await
+                            .unwrap_or(vec![]);
 
-                    let resp_content = report.unwrap_or("Failed to generate report.".to_string());
+                    for issue in issues {
+                        if let Some(body) =
+                            analyze_issue(owner, repo, user_name.unwrap(), issue).await
+                        {
+                            issues_summaries.push_str(&body);
+                            issues_summaries.push_str("\n");
+                        }
+                    }
+
+                    let discussion_query = format!(
+                        "involves:{} updated:>{}",
+                        user_name.unwrap(),
+                        a_week_ago_str
+                    );
+                    let discussion_data = search_discussion(&discussion_query)
+                        .await
+                        .unwrap_or("".to_string());
+
+                    let resp_content =
+                        correlate_commits_issues(&commits_summaries, &issues_summaries).await;
+
+                    let resp_content =
+                        resp_content.unwrap_or("Failed to generate report.".to_string());
                     let resp = serde_json::json!({
                         "content": resp_content.to_string()
                     });

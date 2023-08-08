@@ -11,7 +11,7 @@ pub async fn process_commits_in_range(
     repo: &str,
     user_name: Option<&str>,
     range: u16,
-) -> Option<String> {
+) -> Option<(String, usize)> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
         login: String,
@@ -50,7 +50,7 @@ pub async fn process_commits_in_range(
     let mut commits_summaries = String::new();
     let now = Utc::now();
     let n_days_ago = (now - Duration::days(range as i64)).date_naive();
-
+    let mut commits_count = 0;
     match github_http_fetch(&github_token, &commits_url_str).await {
         None => log::error!("Error fetching Page of commits"),
         Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
@@ -72,6 +72,7 @@ pub async fn process_commits_in_range(
                     let user_name = &commit.author.login;
                     match analyze_commit(owner, repo, user_name, &commit.sha).await {
                         Some(summary) => {
+                            commits_count += 1;
                             commits_summaries.push_str(&summary);
                             commits_summaries.push('\n');
                             if commits_summaries.len() > 45_000 {
@@ -91,7 +92,7 @@ pub async fn process_commits_in_range(
         },
     }
 
-    Some(commits_summaries)
+    Some((commits_summaries, commits_count))
 }
 
 pub async fn analyze_commit(owner: &str, repo: &str, user_name: &str, sha: &str) -> Option<String> {
