@@ -406,7 +406,7 @@ pub async fn get_all_issues_on_repo_last_n_days(
     let n_days_ago_str = n_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let query = format!("repo:{owner}/{repo} updated:>{n_days_ago_str}");
+    let query = format!("repo:{owner}/{repo} is:issue -is:pr updated:>{n_days_ago_str}");
     let encoded_query = urlencoding::encode(&query);
 
     let mut out: Vec<Issue> = vec![];
