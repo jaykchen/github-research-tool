@@ -5,7 +5,13 @@ use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
-pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str) -> Option<String> {
+
+pub async fn process_commits_in_range(
+    owner: &str,
+    repo: &str,
+    user_name: Option<&str>,
+    range: u16,
+) -> Option<String> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
         login: String,
@@ -32,26 +38,30 @@ pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str)
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let user_commits_repo_str = format!(
-        "https://api.github.com/repos/{}/{}/commits?author={}",
-        owner, repo, user_name
-    );
+
+    let author_str = match user_name {
+        Some(user_name) => format!("?author={}", user_name),
+        None => "".to_string(),
+    };
+
+    let commits_url_str =
+        format!("https://api.github.com/repos/{owner}/{repo}/commits{author_str}",);
 
     let mut commits_summaries = String::new();
     let now = Utc::now();
-    let a_week_ago = (now - Duration::days(7)).date_naive();
+    let n_days_ago = (now - Duration::days(range as i64)).date_naive();
 
-    match github_http_fetch(&github_token, &user_commits_repo_str).await {
-        None => println!("Error fetching Page of commits"),
+    match github_http_fetch(&github_token, &commits_url_str).await {
+        None => log::error!("Error fetching Page of commits"),
         Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(e) => println!("Error parsing commits object: {:?}", e),
+            Err(e) => log::error!("Error parsing commits object: {:?}", e),
             Ok(commits_obj) => {
                 let recent_commits: Vec<_> = commits_obj
                     .into_iter()
                     .filter(|commit| {
                         if let Some(commit_date) = &commit.commit.author.date {
                             let commit_naive_date = commit_date.date_naive();
-                            commit_naive_date > a_week_ago
+                            commit_naive_date > n_days_ago
                         } else {
                             false
                         }
@@ -59,6 +69,7 @@ pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str)
                     .collect();
 
                 for commit in &recent_commits {
+                    let user_name = &commit.author.login;
                     match analyze_commit(owner, repo, user_name, &commit.sha).await {
                         Some(summary) => {
                             commits_summaries.push_str(&summary);
@@ -74,144 +85,6 @@ pub async fn process_commits_last_week(owner: &str, repo: &str, user_name: &str)
                                 user_name
                             )
                         }
-                    }
-                }
-            }
-        },
-    }
-
-    Some(commits_summaries)
-}
-
-pub async fn process_repo_commits_last_week(owner: &str, repo: &str) -> Option<String> {
-    #[derive(Debug, Deserialize, Serialize)]
-    struct User {
-        login: String,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct GithubCommit {
-        sha: String,
-        html_url: String,
-        author: User,
-        committer: User,
-        commit: CommitDetails,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct CommitDetails {
-        author: CommitUserDetails,
-        // committer: CommitUserDetails,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct CommitUserDetails {
-        date: Option<DateTime<Utc>>,
-    }
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let user_commits_repo_str = format!("https://api.github.com/repos/{}/{}/commits", owner, repo);
-
-    let mut commits_summaries = String::new();
-    let now = Utc::now();
-    let a_week_ago = (now - Duration::days(7)).date_naive();
-    let mut user_name = String::new();
-    match github_http_fetch(&github_token, &user_commits_repo_str).await {
-        None => println!("Error fetching Page of commits"),
-        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(e) => println!("Error parsing commits object: {:?}", e),
-            Ok(commits_obj) => {
-                let recent_commits: Vec<_> = commits_obj
-                    .into_iter()
-                    .filter(|commit| {
-                        if let Some(commit_date) = &commit.commit.author.date {
-                            let commit_naive_date = commit_date.date_naive();
-                            commit_naive_date > a_week_ago
-                        } else {
-                            false
-                        }
-                    })
-                    .collect();
-
-                for commit in &recent_commits {
-                    user_name = commit.author.login.clone();
-                    match analyze_commit(owner, repo, &user_name, &commit.sha).await {
-                        Some(summary) => {
-                            commits_summaries.push_str(&summary);
-                            commits_summaries.push('\n');
-                            if commits_summaries.len() > 45_000 {
-                                break;
-                            }
-                        }
-                        None => {
-                            log::error!(
-                                "Error analyzing commit {:?} for user {}",
-                                commit.sha,
-                                user_name
-                            )
-                        }
-                    }
-                }
-            }
-        },
-    }
-
-    Some(commits_summaries)
-}
-
-pub async fn process_commits(owner: &str, repo: &str, user_name: &str) -> Option<String> {
-    #[derive(Debug, Deserialize, Serialize)]
-    struct User {
-        login: String,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct GithubCommit {
-        sha: String,
-        html_url: String,
-        author: User,
-        committer: User,
-        commit: CommitDetails,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct CommitDetails {
-        author: CommitUserDetails,
-        // committer: CommitUserDetails,
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct CommitUserDetails {
-        date: Option<DateTime<Utc>>,
-    }
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let user_commits_repo_str = format!(
-        "https://api.github.com/repos/{}/{}/commits?author={}",
-        owner, repo, user_name
-    );
-
-    let mut commits_summaries = String::new();
-
-    match github_http_fetch(&github_token, &user_commits_repo_str).await {
-        None => println!("Error fetching Page of commits"),
-        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(e) => println!("Error parsing commits object: {:?}", e),
-            Ok(commits_obj) => {
-                for commit in &commits_obj {
-                    match analyze_commit(owner, repo, user_name, &commit.sha).await {
-                        Some(summary) => {
-                            commits_summaries.push_str(&summary);
-                            commits_summaries.push('\n');
-                            if commits_summaries.len() > 45_000 {
-                                break;
-                            }
-                        }
-                        None => log::error!(
-                            "Error analyzing commit {:?} for user {}",
-                            commit.sha,
-                            user_name
-                        ),
                     }
                 }
             }
@@ -292,9 +165,9 @@ pub async fn correlate_commits_issues_discussions(
     let sys_prompt_1 = &format!("Analyze the given commit logs, issue records, and discussion threads to identify and quantify the impactful contributions of each individual member during the week. Focus on specific changes, improvements, or resolutions that each member contributed. Provide a bullet-point analysis for each member, emphasizing their distinct contributions and measurable impact on the project.");
 
     let usr_prompt_1 = &format!("Given the commit logs: {commits_summary}, issue records: {issues_summary}, and discussion threads: {_discussions}, identify the contributions of each member during the week. List down the specific tasks, enhancements, or resolutions made by each individual. Ensure the focus is on concrete and impactful contributions that each member brought to the project.");
-    
+
     let usr_prompt_2 = &format!("Now, synthesize the individual analyses into a cohesive summary. Describe how each member's contributions this week fit into the overall progression and objectives of the project. Focus on collaboration, interplay between different contributions, and the collective impact of the team. Mention any overarching themes or patterns observed during the week. Ensure the narrative reflects both individual efforts and their combined influence on the project's advancement. Limit your answer to 256 tokens.");
-    
+
     chain_of_chat(
         sys_prompt_1,
         usr_prompt_1,
