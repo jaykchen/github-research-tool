@@ -1,17 +1,39 @@
 use crate::octocrab_compat::{Comment, Issue};
 use crate::utils::*;
+use chrono::prelude::*;
 use chrono::{DateTime, Duration, Utc};
+use derivative::Derivative;
 use log;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
+#[derive(Derivative, Serialize, Deserialize, Debug)]
+pub struct GitMemory {
+    pub memory_type: MemoryType,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub name: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub tag_line: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub html_url: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub payload: String,
+    pub date: NaiveDate,
+}
+#[derive(Serialize, Deserialize, Debug)]
+pub enum MemoryType {
+    Commit,
+    Issue,
+    Discussion,
+    Meta,
+}
 pub async fn process_commits_in_range(
     owner: &str,
     repo: &str,
     user_name: Option<&str>,
     range: u16,
-) -> Option<(String, usize)> {
+) -> Option<(String, usize, Vec<GitMemory>)> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
         login: String,
@@ -29,6 +51,7 @@ pub async fn process_commits_in_range(
     #[derive(Serialize, Deserialize, Debug)]
     struct CommitDetails {
         author: CommitUserDetails,
+        message: String,
         // committer: CommitUserDetails,
     }
 
@@ -44,72 +67,90 @@ pub async fn process_commits_in_range(
         None => "".to_string(),
     };
 
-    let commits_url_str =
+    let commits_query_url =
         format!("https://api.github.com/repos/{owner}/{repo}/commits{author_str}",);
 
     let mut commits_summaries = String::new();
+    let mut git_memory_vec = vec![];
     let now = Utc::now();
     let n_days_ago = (now - Duration::days(range as i64)).date_naive();
-    let mut commits_count = 0;
-    match github_http_fetch(&github_token, &commits_url_str).await {
+    match github_http_fetch(&github_token, &commits_query_url).await {
         None => log::error!("Error fetching Page of commits"),
         Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
             Err(e) => log::error!("Error parsing commits object: {:?}", e),
             Ok(commits_obj) => {
-                let recent_commits: Vec<_> = commits_obj
-                    .into_iter()
-                    .filter(|commit| {
-                        if let Some(commit_date) = &commit.commit.author.date {
-                            let commit_naive_date = commit_date.date_naive();
-                            commit_naive_date > n_days_ago
-                        } else {
-                            false
-                        }
-                    })
-                    .collect();
-
-                for commit in &recent_commits {
-                    let user_name = &commit.author.login;
-                    match analyze_commit(owner, repo, user_name, &commit.sha).await {
-                        Some(summary) => {
-                            commits_count += 1;
-                            commits_summaries.push_str(&summary);
-                            commits_summaries.push('\n');
-                            if commits_summaries.len() > 45_000 {
-                                break;
-                            }
-                        }
-                        None => {
-                            log::error!(
-                                "Error analyzing commit {:?} for user {}",
-                                commit.sha,
-                                user_name
+                for commit in commits_obj {
+                    if let Some(commit_date) = &commit.commit.author.date {
+                        if commit_date.date_naive() > n_days_ago {
+                            let user_name = &commit.author.login;
+                            match analyze_commit(
+                                owner,
+                                repo,
+                                user_name,
+                                &commit.commit.message,
+                                &commit.html_url,
                             )
+                            .await
+                            {
+                                Some(summary) => {
+                                    let html_url = commit.html_url;
+                                    let date = commit_date.date_naive();
+
+                                    git_memory_vec.push(GitMemory {
+                                        memory_type: MemoryType::Commit,
+                                        name: user_name.to_string(),
+                                        tag_line: commit.commit.message,
+                                        html_url: html_url,
+                                        payload: summary.clone(),
+                                        date: date,
+                                    });
+
+                                    if commits_summaries.len() <= 45_000 {
+                                        commits_summaries.push_str(&format!("{date} {summary} \n"));
+                                    }
+                                }
+                                None => {
+                                    log::error!(
+                                        "Error analyzing commit {:?} for user {}",
+                                        commit.sha,
+                                        user_name
+                                    );
+                                }
+                            }
                         }
                     }
                 }
             }
         },
     }
-
-    Some((commits_summaries, commits_count))
+    let count = git_memory_vec.len();
+    Some((commits_summaries, count, git_memory_vec))
 }
 
-pub async fn analyze_commit(owner: &str, repo: &str, user_name: &str, sha: &str) -> Option<String> {
+pub async fn analyze_commit(
+    owner: &str,
+    repo: &str,
+    user_name: &str,
+    tag_line: &str,
+    url: &str,
+) -> Option<String> {
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
 
-    let commit_patch_str = format!("https://github.com/{owner}/{repo}/commit/{sha}.patch");
+    let commit_patch_str = format!("{url}.patch");
     match github_http_fetch(&github_token, &commit_patch_str).await {
         Some(res) => {
             let text = String::from_utf8_lossy(res.as_slice()).to_string();
 
-            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name} on the {repo} project. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements such as the date of the commit (in 'yyyy/mm/dd' format), a summary of changes, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
+            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name} on the {repo} project. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements of the commit, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
 
-            let usr_prompt_1 = &format!("Based on the provided commit patch: {text}, extract and present the following key elements: the date of the commit (formatted as 'yyyy/mm/dd'), a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item.");
+            let usr_prompt_1 = &format!("Based on the provided commit patch: {text}, and description: {tag_line}, extract and present the following key elements: a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item.");
 
-            let usr_prompt_2 = &format!("Using the key elements you extracted from the commit patch, provide a summary of the user's contributions to the project. Include the date of the commit, the types of files affected, and the overall changes made. When describing the affected files, make sure to differentiate between changes to core code files, scripts, and documentation files. Present your summary in this format: 'On (date in 'yyyy/mm/dd' format), (summary of changes). (overall impact of changes).' Please ensure your answer stayed below 128 tokens.");
+            let usr_prompt_2 = &format!("Using the key elements you extracted from the commit patch, provide a summary of the user's contributions to the project. Include the types of files affected, and the overall changes made. When describing the affected files, make sure to differentiate between changes to core code files, scripts, and documentation files. Present your summary in this format: '(summary of changes). (overall impact of changes).' Please ensure your answer stayed below 128 tokens.");
 
-            let sha_serial = sha.chars().take(5).collect::<String>();
+            let sha_serial = match url.rsplitn(2, "/").nth(0) {
+                Some(s) => s.chars().take(5).collect::<String>(),
+                None => "0000".to_string(),
+            };
             chain_of_chat(
                 sys_prompt_1,
                 usr_prompt_1,

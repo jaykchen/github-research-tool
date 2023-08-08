@@ -13,7 +13,7 @@ pub async fn weekly_report(
         Some(key) => key,
         None => "contributors",
     };
-    let (success_or_fail, contributor_count) = populate_contributors(owner, repo, key).await;
+    let (success_or_fail, contributor_count) = populate_contributors(owner, repo).await;
     if !success_or_fail {
         log::error!("weekly_report, failed to populate contributors");
         return None;
@@ -21,7 +21,7 @@ pub async fn weekly_report(
 
     let has_user_name = user_name.is_some();
 
-    let is_new_contributor = is_new_contributor(user_name.unwrap(), key).await;
+    let is_new_contributor = is_new_contributor(owner, repo, user_name.unwrap()).await;
 
     if has_user_name && is_new_contributor {
         return new_contributor_report(owner, repo, user_name.unwrap()).await;
@@ -94,9 +94,10 @@ pub async fn current_contributor_report(
     // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
 
-    let (commits_summaries, commits_count) = process_commits_in_range(owner, repo, Some(user_name), 7)
-        .await
-        .unwrap_or_default();
+    let (commits_summaries, commits_count, commits_vec) =
+        process_commits_in_range(owner, repo, Some(user_name), 7)
+            .await
+            .unwrap_or_default();
 
     let mut issues_summaries = String::new();
     let issues = get_user_issues_on_repo_last_n_days(owner, repo, user_name, 7)
@@ -125,7 +126,7 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
     // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
 
-    let (commits_summaries, commits_count) = process_commits_in_range(owner, repo, None, 7)
+    let (commits_summaries, commits_count, commits_vec) = process_commits_in_range(owner, repo, None, 7)
         .await
         .unwrap_or_default();
     send_message_to_channel("ik8", "ch_rep", commits_summaries.clone()).await;
@@ -150,5 +151,10 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
         .unwrap_or("".to_string());
     send_message_to_channel("ik8", "ch_dis", discussion_data.clone()).await;
 
-    return correlate_commits_issues_discussions(&commits_summaries, &issues_summaries, &discussion_data).await;
+    return correlate_commits_issues_discussions(
+        &commits_summaries,
+        &issues_summaries,
+        &discussion_data,
+    )
+    .await;
 }

@@ -208,7 +208,14 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
     None
 }
 
-pub async fn is_new_contributor(user_name: &str, key: &str) -> bool {
+pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> bool {
+    use twox_hash::XxHash;
+    use std::hash::Hasher;
+    let repo_string = format!("{owner}/{repo}");
+    let mut hasher = XxHash::with_seed(0);
+    hasher.write(repo_string.as_bytes());
+    let hash = hasher.finish();
+    let key = &format!("{:x}", hash);
     match get(key)
         .and_then(|val| serde_json::from_value::<std::collections::HashSet<String>>(val).ok())
     {
@@ -216,7 +223,15 @@ pub async fn is_new_contributor(user_name: &str, key: &str) -> bool {
         None => true,
     }
 }
-pub async fn populate_contributors(owner: &str, repo: &str, key: &str) -> (bool, u16) {
+pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
+    use twox_hash::XxHash;
+    use std::hash::Hasher;
+    let repo_string = format!("{owner}/{repo}");
+    let mut hasher = XxHash::with_seed(0);
+    hasher.write(repo_string.as_bytes());
+    let hash = hasher.finish();
+    let key = &format!("{:x}", hash);
+
     match get_contributors(owner, repo).await {
         None => (false, 0_u16),
 

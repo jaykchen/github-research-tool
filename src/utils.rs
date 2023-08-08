@@ -1,4 +1,3 @@
-
 use http_req::{request::Method, request::Request, response, uri::Uri};
 use log;
 use openai_flows::{
@@ -206,27 +205,34 @@ pub async fn github_http_post(token: &str, base_url: &str, query: &str) -> Optio
     }
 }
 
-pub async fn save_user(username: &str) -> bool {
-    // Get the existing usernames
-    let mut existing_users: HashSet<String> = get("usernames")
+pub async fn save_user(owner: &str, repo: &str, user_name: &str) -> bool {
+    use std::hash::Hasher;
+    use twox_hash::XxHash;
+    let repo_string = format!("{owner}/{repo}");
+    let mut hasher = XxHash::with_seed(0);
+    hasher.write(repo_string.as_bytes());
+    let hash = hasher.finish();
+    let key = &format!("{:x}", hash);
+
+    let mut existing_users: HashSet<String> = get(key)
         .and_then(|val| serde_json::from_value(val).ok())
         .unwrap_or_else(HashSet::new);
 
-    // Check if the username already exists
-    let already_exists = existing_users.contains(username);
+    // Check if the user_name already exists
+    let already_exists = existing_users.contains(user_name);
 
-    // If the username is not in the set, add it
+    // If the user_name is not in the set, add it
     if !already_exists {
-        existing_users.insert(username.to_string());
+        existing_users.insert(user_name.to_string());
     }
 
     // Save updated records
     set(
-        "usernames",
+        key,
         Value::String(serde_json::to_string(&existing_users).unwrap()),
         None,
     );
 
-    // If the username was added, return true; otherwise, return false
+    // If the user_name was added, return true; otherwise, return false
     !already_exists
 }

@@ -6,7 +6,7 @@ pub mod utils;
 use chrono::{Duration, Utc};
 use data_analyzers::*;
 use discord_flows::{
-    http::{Http, HttpBuilder},
+    http::HttpBuilder,
     model::{
         application_command::CommandDataOptionValue, channel, guild, interaction, Interaction,
     },
@@ -44,7 +44,7 @@ pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    let _ = register_once(&discord_token).await;
+    // let _ = register_once(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
@@ -114,18 +114,6 @@ async fn register_commands(discord_token: &str) -> bool {
             }
         ]
     });
-    let command_save_user = serde_json::json!({
-        "name": "save_user",
-        "description": "Check whether a username already exists, save it if new",
-        "options": [
-            {
-                "name": "username",
-                "description": "The username to save",
-                "type": 3, // String type according to Discord's API
-                "required": true
-            }
-        ]
-    });
 
     let bot_id = env::var("bot_id").unwrap_or("1124137839601406013".to_string());
     // let channel_id = env::var("discord_channel_id").unwrap_or("1128056246570860617".to_string());
@@ -134,7 +122,6 @@ async fn register_commands(discord_token: &str) -> bool {
     let commands = serde_json::json!([
         command_weekly_report,
         command_get_user_repos,
-        command_save_user,
         command_search,
     ]);
     let http_client = HttpBuilder::new(discord_token)
@@ -211,7 +198,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     let a_week_ago = now - Duration::days(7);
                     let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-                    let (commits_summaries, commits_count) =
+                    let (commits_summaries, commits_count, commits_vec) =
                         process_commits_in_range(owner, repo, user_name, 7)
                             .await
                             .unwrap_or_default();
@@ -224,7 +211,21 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await
                     {
                         Ok(_) => {}
-                        Err(_e) => log::error!("error sending weekly_report message: {:?}", _e),
+                        Err(_e) => log::error!("error sending commit count: {:?}", _e),
+                    }
+                    let content = match commits_vec.last() {
+                        Some(tag) => tag.tag_line.to_string(),
+                        None => "No commits to report.".to_string(),
+                    };
+                    let resp = serde_json::json!({
+                        "content": content
+                    });
+                    match client
+                        .edit_original_interaction_response(&ac.token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending last commit tagline: {:?}", _e),
                     }
 
                     let mut issues_summaries = String::new();
@@ -268,38 +269,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         Err(_e) => log::error!("error sending weekly_report message: {:?}", _e),
                     }
                 }
-                "save_user" => {
-                    let options = ac
-                        .data
-                        .options
-                        .get(0)
-                        .expect("Expected username")
-                        .resolved
-                        .as_ref()
-                        .expect("Expected username object");
 
-                    let username = match options {
-                        CommandDataOptionValue::String(s) => s,
-                        _ => panic!("Expected string for username"),
-                    };
-                    save_user(username).await;
-
-                    let usernames = get("usernames")
-                        .unwrap_or(serde_json::json!({}))
-                        .to_string();
-                    send_message_to_channel("ik8", "ch_in", usernames.to_string()).await;
-
-                    resp = serde_json::json!({
-                        "content": usernames
-                    });
-                    match client
-                        .edit_original_interaction_response(&ac.token, &resp)
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(_e) => log::error!("error sending save_user message: {:?}", _e),
-                    }
-                }
                 "get_user_repos" => {
                     let options = &ac.data.options;
 
