@@ -208,10 +208,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         Err(_e) => log::error!("error sending commit count: {:?}", _e),
                     }
 
-                    let (commits_summaries, _, _) =
-                        process_commits_in_range_wrapped(commits_vec)
-                            .await
-                            .unwrap_or_default();
+                    let (commits_summaries, _, _) = process_commits_in_range_wrapped(commits_vec)
+                        .await
+                        .unwrap_or_default();
 
                     let resp = serde_json::json!({
                         "content": commits_summaries
@@ -225,16 +224,27 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                     }
 
                     let mut issues_summaries = String::new();
-                    let issues =
-                        get_user_issues_on_repo_last_n_days(owner, repo, user_name.unwrap(), 7)
-                            .await
-                            .unwrap_or(vec![]);
+                    let (count, issue_vec) = get_issues_in_range(owner, repo, user_name, 7)
+                        .await
+                        .unwrap();
+                    let resp = serde_json::json!({
+                        "content": format!("{} issues pulled", count)
+                    });
+                    match client
+                        .edit_original_interaction_response(&ac.token, &resp)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("error sending commit count: {:?}", _e),
+                    }
 
-                    for issue in issues {
-                        if let Some(body) =
-                            analyze_issue(owner, repo, user_name.unwrap(), issue).await
-                        {
-                            issues_summaries.push_str(&body);
+
+                    for issue in issue_vec {
+                        if let Some(text) = get_issue_texts(issue.clone()).await {
+                            let (summary, _) = analyze_issue(issue, user_name, &text)
+                                .await
+                                .unwrap();
+                            issues_summaries.push_str(&summary);
                             issues_summaries.push_str("\n");
                         }
                     }

@@ -1,12 +1,12 @@
-use crate::octocrab_compat::{Issue, Repository, User};
+use crate::octocrab_compat::{Issue, Repository, User, Comment};
 use crate::utils::*;
-use chrono::{DateTime, Duration, Utc, NaiveDate};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
+use derivative::Derivative;
 use http_req::response::Response;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 use store_flows::{get, set};
-use derivative::Derivative;
 
 #[derive(Derivative, Serialize, Deserialize, Debug)]
 pub struct GitMemory {
@@ -16,7 +16,7 @@ pub struct GitMemory {
     #[derivative(Default(value = "String::from(\"\")"))]
     pub tag_line: String,
     #[derivative(Default(value = "String::from(\"\")"))]
-    pub html_url: String,
+    pub source_url: String,
     #[derivative(Default(value = "String::from(\"\")"))]
     pub payload: String,
     pub date: NaiveDate,
@@ -29,6 +29,131 @@ pub enum MemoryType {
     Meta,
 }
 
+pub async fn get_issues_in_range(
+    owner: &str,
+    repo: &str,
+    user_name: Option<&str>,
+    range: u16,
+) -> Option<(usize, Vec<Issue>)> {
+    #[derive(Debug, Deserialize)]
+    struct Page<T> {
+        pub items: Vec<T>,
+        pub total_count: Option<u64>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let now = Utc::now();
+    let n_days_ago = (now - Duration::days(range as i64))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+
+    let user_str = user_name
+        .map(|u| format!("involves:{}", u))
+        .unwrap_or_default();
+    log::error!("user_str: {}", user_str);
+    let query = format!("repo:{owner}/{repo} is:issue {user_str} updated:>{n_days_ago}");
+    let encoded_query = urlencoding::encode(&query);
+
+    let mut issue_vec = vec![];
+    let mut total_pages = None;
+    let mut current_page = 1;
+
+    loop {
+        let url_str = format!(
+            "https://api.github.com/search/issues?q={}&sort=updated&order=desc&page={}",
+            encoded_query, current_page
+        );
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
+                Err(e) => {
+                    log::error!("error: {:?}", e);
+                    break;
+                }
+                Ok(issue_page) => {
+                    if total_pages.is_none() {
+                        if let Some(total) = issue_page.total_count {
+                            total_pages = Some((total as f64 / 30.0).ceil() as usize);
+                        }
+                    }
+
+                    for issue in issue_page.items {
+                        issue_vec.push(issue.clone());
+                    }
+
+                    current_page += 1;
+                    if current_page > total_pages.unwrap_or(usize::MAX) {
+                        break;
+                    }
+                }
+            },
+            None => break,
+        }
+    }
+    let count = issue_vec.len();
+    Some((count, issue_vec))
+}
+pub async fn get_issue_texts(issue: Issue) -> Option<String> {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let issue_creator_name = issue.user.login;
+    let issue_title = issue.title;
+    let issue_body = match issue.body {
+        Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+        None => "".to_string(),
+    };
+    let issue_url = issue.url.to_string();
+
+    let labels = issue
+        .labels
+        .into_iter()
+        .map(|lab| lab.name)
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    let mut all_text_from_issue = format!("User '{issue_creator_name}', has submitted an issue titled '{issue_title}', labeled as '{labels}', with the following post: '{issue_body}'.");
+
+    let mut current_page = 1;
+    loop {
+        let url_str = format!("{issue_url}/comments?&page={}", current_page);
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) => match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
+                Err(_e) => {
+                    log::error!(
+                        "Error parsing Vec<Comment> at page {}: {:?}",
+                        current_page,
+                        _e
+                    );
+                    break;
+                }
+                Ok(comments_obj) => {
+                    if comments_obj.is_empty() {
+                        break; // Exit the loop when there are no more comments to process
+                    }
+                    for comment in comments_obj {
+                        let comment_body = match comment.body {
+                            Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+                            None => "".to_string(),
+                        };
+                        let commenter = comment.user.login;
+                        let commenter_input = format!("{commenter} commented: {comment_body}");
+                        if all_text_from_issue.len() > 45_000 {
+                            break;
+                        }
+                        all_text_from_issue.push_str(&commenter_input);
+                    }
+                }
+            },
+            None => break,
+        }
+
+        current_page += 1;
+    }
+
+    Some(all_text_from_issue)
+}
 pub async fn get_commits_in_range(
     owner: &str,
     repo: &str,
@@ -75,19 +200,18 @@ pub async fn get_commits_in_range(
     let now = Utc::now();
     let n_days_ago = (now - Duration::days(range as i64)).date_naive();
     match github_http_fetch(&github_token, &commits_query_url).await {
-        None => println!("Error fetching Page of commits"),
+        None => log::error!("Error fetching Page of commits"),
         Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(e) => println!("Error parsing commits object: {:?}", e),
+            Err(e) => log::error!("Error parsing commits object: {:?}", e),
             Ok(commits_obj) => {
                 for commit in commits_obj {
                     if let Some(commit_date) = &commit.commit.author.date {
                         if commit_date.date_naive() > n_days_ago {
-                            
                             git_memory_vec.push(GitMemory {
                                 memory_type: MemoryType::Commit,
                                 name: commit.author.login,
                                 tag_line: commit.commit.message,
-                                html_url: commit.html_url,
+                                source_url: commit.html_url,
                                 payload: String::from(""),
                                 date: commit_date.date_naive(),
                             });
@@ -302,8 +426,8 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
 }
 
 pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> bool {
-    use twox_hash::XxHash;
     use std::hash::Hasher;
+    use twox_hash::XxHash;
     let repo_string = format!("{owner}/{repo}");
     let mut hasher = XxHash::with_seed(0);
     hasher.write(repo_string.as_bytes());
@@ -317,8 +441,8 @@ pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> boo
     }
 }
 pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
-    use twox_hash::XxHash;
     use std::hash::Hasher;
+    use twox_hash::XxHash;
     let repo_string = format!("{owner}/{repo}");
     let mut hasher = XxHash::with_seed(0);
     hasher.write(repo_string.as_bytes());

@@ -1,7 +1,6 @@
 use crate::github_data_fetchers::*;
-use crate::octocrab_compat::{Comment, Issue};
+use crate::octocrab_compat::Issue;
 use crate::utils::*;
-use chrono::prelude::*;
 use chrono::{DateTime, Duration, Utc};
 use derivative::Derivative;
 use log;
@@ -72,14 +71,14 @@ pub async fn process_commits_in_range(
                             .await
                             {
                                 Some(summary) => {
-                                    let html_url = commit.html_url;
+                                    let source_url = commit.html_url;
                                     let date = commit_date.date_naive();
 
                                     git_memory_vec.push(GitMemory {
                                         memory_type: MemoryType::Commit,
                                         name: user_name.to_string(),
                                         tag_line: commit.commit.message,
-                                        html_url: html_url,
+                                        source_url: source_url,
                                         payload: summary.clone(),
                                         date: date,
                                     });
@@ -116,7 +115,7 @@ pub async fn process_commits_in_range_wrapped(
         match analyze_commit(
             &commit_obj.name,
             &commit_obj.tag_line,
-            &commit_obj.html_url,
+            &commit_obj.source_url,
         )
         .await
         {
@@ -134,7 +133,7 @@ pub async fn process_commits_in_range_wrapped(
             None => {
                 log::error!(
                     "Error analyzing commit {:?} for user {}",
-                    commit_obj.html_url,
+                    commit_obj.source_url,
                     commit_obj.name
                 );
             }
@@ -145,11 +144,7 @@ pub async fn process_commits_in_range_wrapped(
     Some((commits_summaries, count, git_memory_vec))
 }
 
-pub async fn analyze_commit(
-    user_name: &str,
-    tag_line: &str,
-    url: &str,
-) -> Option<String> {
+pub async fn analyze_commit(user_name: &str, tag_line: &str, url: &str) -> Option<String> {
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
 
     let commit_patch_str = format!("{url}.patch");
@@ -268,9 +263,11 @@ pub async fn correlate_user_and_home_project(
     .await
 }
 
-pub async fn analyze_issue(owner: &str, repo: &str, user: &str, issue: Issue) -> Option<String> {
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-
+pub async fn analyze_issue(
+    issue: Issue,
+    target_person: Option<&str>,
+    all_text: &str,
+) -> Option<(String, GitMemory)> {
     let issue_creator_name = issue.user.login;
     let issue_number = issue.number;
     let issue_title = issue.title;
@@ -278,47 +275,13 @@ pub async fn analyze_issue(owner: &str, repo: &str, user: &str, issue: Issue) ->
         Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
         None => "".to_string(),
     };
-    let issue_date = issue.created_at.date_naive().to_string();
-    let html_url = issue.html_url.to_string();
+    let issue_date = issue.created_at.date_naive();
+    let issue_url = issue.url.to_string();
+    let target_str = target_person.unwrap_or("key participants");
 
-    let labels = issue
-        .labels
-        .into_iter()
-        .map(|lab| lab.name)
-        .collect::<Vec<String>>()
-        .join(", ");
-
-    let mut all_text_from_issue = format!("User '{issue_creator_name}', has submitted an issue titled '{issue_title}', labeled as '{labels}', with the following post: '{issue_body}'.");
-
-    let url_str = format!(
-        "https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments?per_page=100",
-    );
-
-    match github_http_fetch(&github_token, &url_str).await {
-        Some(res) => match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
-            Err(_e) => log::error!("Error parsing Vec<Comment>: {:?}", _e),
-            Ok(comments_obj) => {
-                for comment in comments_obj {
-                    let comment_body = match comment.body {
-                        Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
-                        None => "".to_string(),
-                    };
-                    let commenter = comment.user.login;
-                    let commenter_input = format!("{commenter} commented: {comment_body}");
-                    all_text_from_issue.push_str(&commenter_input);
-
-                    if all_text_from_issue.len() > 45_000 {
-                        break;
-                    }
-                }
-            }
-        },
-        None => {}
-    };
-
-    let sys_prompt_1 = &format!("Given the information that user '{issue_creator_name}' opened an issue titled '{issue_title}', labelled as '{labels}', your task is to analyze the content of the issue posts. Extract key details including the main problem or question raised, the environment in which the issue occurred, any steps taken by the user to address the problem, relevant discussions, and any identified solutions or pending tasks.");
-    let usr_prompt_1 = &format!("Based on the GitHub issue posts: {all_text_from_issue}, please list the following key details: The main problem or question raised in the issue. The environment or conditions in which the issue occurred (e.g., hardware, OS). Any steps or actions taken by the user '{user}' or others to address the issue. Key discussions or points of view shared by participants in the issue thread. Any solutions identified, or pending tasks if the issue hasn't been resolved. The role and contribution of the user '{user}' in the issue.");
-    let usr_prompt_2 = &format!("Provide a brief summary highlighting the core problem and emphasize the overarching contribution made by '{user}' to the resolution of this issue, ensuring your response stays under 128 tokens.");
+    let sys_prompt_1 = &format!("Given the information that user '{issue_creator_name}' opened an issue titled '{issue_title}', your task is to analyze the content of the issue posts. Extract key details including the main problem or question raised, the environment in which the issue occurred, any steps taken by the user and commenters to address the problem, relevant discussions, and any identified solutions, consesus reached, or pending tasks.");
+    let usr_prompt_1 = &format!("Based on the GitHub issue posts: {all_text}, please list the following key details: The main problem or question raised in the issue. The environment or conditions in which the issue occurred (e.g., hardware, OS). Any steps or actions taken by the user or commenters to address the issue. Key discussions or points of view shared by participants in the issue thread. Any solutions identified, consensus reached, or pending tasks if the issue hasn't been resolved. The role and contribution of the user or commenters in the issue.");
+    let usr_prompt_2 = &format!("Provide a brief summary highlighting the core problem and emphasize the overarching contribution made by '{target_str}' to the resolution of this issue, ensuring your response stays under 128 tokens.");
 
     match chain_of_chat(
         sys_prompt_1,
@@ -332,15 +295,25 @@ pub async fn analyze_issue(owner: &str, repo: &str, user: &str, issue: Issue) ->
     .await
     {
         Some(issue_summary) => {
-            let mut out = html_url.to_string();
-            out.push(' ');
+            let mut out = format!("{issue_url} ");
             out.push_str(&issue_summary);
-            return Some(out);
-        }
-        None => {}
-    }
+            let name = target_person.unwrap_or(&issue_creator_name).to_string();
+            let gm = GitMemory {
+                memory_type: MemoryType::Issue,
+                name: name,
+                tag_line: issue_title,
+                source_url: issue_url,
+                payload: out.clone(),
+                date: issue_date,
+            };
 
-    None
+            Some((out, gm))
+        }
+        None => {
+            log::error!("Error generating issue summary #{issue_number}");
+            None
+        }
+    }
 }
 
 /* pub async fn analyze_discussion(owner: &str, repo: &str, user: &str, discussion: Discussion) -> Option<String> {

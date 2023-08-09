@@ -104,12 +104,12 @@ pub async fn current_contributor_report(
         .await
         .unwrap_or(vec![]);
 
-    for issue in issues {
-        if let Some(body) = analyze_issue(owner, repo, user_name, issue).await {
-            issues_summaries.push_str(&body);
-            issues_summaries.push_str("\n");
-        }
-    }
+    // for issue in issues {
+    //     if let Some(body) = analyze_issue(owner, repo, user_name, issue).await {
+    //         issues_summaries.push_str(&body);
+    //         issues_summaries.push_str("\n");
+    //     }
+    // }
 
     let discussion_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     let discussion_data = search_discussion(&discussion_query)
@@ -138,10 +138,10 @@ pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
 
     for issue in issues {
         let user_name = issue.user.login.clone();
-        if let Some(body) = analyze_issue(owner, repo, &user_name, issue).await {
-            issues_summaries.push_str(&body);
-            issues_summaries.push_str("\n");
-        }
+        // if let Some(body) = analyze_issue(owner, repo, &user_name, issue).await {
+        //     issues_summaries.push_str(&body);
+        //     issues_summaries.push_str("\n");
+        // }
     }
     send_message_to_channel("ik8", "ch_iss", issues_summaries.clone()).await;
 
