@@ -220,7 +220,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await
                     {
                         Ok(_) => {}
-                        Err(_e) => log::error!("error sending commit count: {:?}", _e),
+                        Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
                     }
 
                     let mut issues_summaries = String::new();
@@ -235,7 +235,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         .await
                     {
                         Ok(_) => {}
-                        Err(_e) => log::error!("error sending commit count: {:?}", _e),
+                        Err(_e) => log::error!("error sending issues count: {:?}", _e),
                     }
 
 

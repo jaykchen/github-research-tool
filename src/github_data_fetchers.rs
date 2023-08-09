@@ -189,38 +189,55 @@ pub async fn get_commits_in_range(
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
 
     let author_str = match user_name {
-        Some(user_name) => format!("?author={}", user_name),
+        Some(user_name) => format!("author={}", user_name),
         None => "".to_string(),
     };
 
-    let commits_query_url =
-        format!("https://api.github.com/repos/{owner}/{repo}/commits{author_str}",);
+    let base_commit_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/commits?{author_str}",);
 
     let mut git_memory_vec = vec![];
     let now = Utc::now();
     let n_days_ago = (now - Duration::days(range as i64)).date_naive();
-    match github_http_fetch(&github_token, &commits_query_url).await {
-        None => log::error!("Error fetching Page of commits"),
-        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-            Err(e) => log::error!("Error parsing commits object: {:?}", e),
-            Ok(commits_obj) => {
-                for commit in commits_obj {
-                    if let Some(commit_date) = &commit.commit.author.date {
-                        if commit_date.date_naive() > n_days_ago {
-                            git_memory_vec.push(GitMemory {
-                                memory_type: MemoryType::Commit,
-                                name: commit.author.login,
-                                tag_line: commit.commit.message,
-                                source_url: commit.html_url,
-                                payload: String::from(""),
-                                date: commit_date.date_naive(),
-                            });
+    let mut current_page = 1;
+    loop {
+        let commits_query_url = format!("{base_commit_url}&page={}", current_page);
+        match github_http_fetch(&github_token, &commits_query_url).await {
+            None => {
+                log::error!("Error fetching commits");
+                break;
+            }
+            Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
+                Err(e) => {
+                    log::error!("Error parsing commits: {:?}", e);
+                    break;
+                }
+                Ok(commits) => {
+                    if commits.is_empty() {
+                        break; // If the page is empty, exit the loop
+                    }
+
+                    for commit in commits {
+                        if let Some(commit_date) = &commit.commit.author.date {
+                            if commit_date.date_naive() > n_days_ago {
+                                git_memory_vec.push(GitMemory {
+                                    memory_type: MemoryType::Commit,
+                                    name: commit.author.login,
+                                    tag_line: commit.commit.message,
+                                    source_url: commit.html_url,
+                                    payload: String::from(""),
+                                    date: commit_date.date_naive(),
+                                });
+                            }
                         }
                     }
+
+                    current_page += 1;
                 }
-            }
-        },
+            },
+        }
     }
+
     let count = git_memory_vec.len();
     Some((count, git_memory_vec))
 }
