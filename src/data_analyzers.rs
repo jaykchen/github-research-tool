@@ -1,3 +1,4 @@
+use crate::github_data_fetchers::*;
 use crate::octocrab_compat::{Comment, Issue};
 use crate::utils::*;
 use chrono::prelude::*;
@@ -8,26 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
-#[derive(Derivative, Serialize, Deserialize, Debug)]
-pub struct GitMemory {
-    pub memory_type: MemoryType,
-    #[derivative(Default(value = "String::from(\"\")"))]
-    pub name: String,
-    #[derivative(Default(value = "String::from(\"\")"))]
-    pub tag_line: String,
-    #[derivative(Default(value = "String::from(\"\")"))]
-    pub html_url: String,
-    #[derivative(Default(value = "String::from(\"\")"))]
-    pub payload: String,
-    pub date: NaiveDate,
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub enum MemoryType {
-    Commit,
-    Issue,
-    Discussion,
-    Meta,
-}
 pub async fn process_commits_in_range(
     owner: &str,
     repo: &str,
@@ -84,8 +65,6 @@ pub async fn process_commits_in_range(
                         if commit_date.date_naive() > n_days_ago {
                             let user_name = &commit.author.login;
                             match analyze_commit(
-                                owner,
-                                repo,
                                 user_name,
                                 &commit.commit.message,
                                 &commit.html_url,
@@ -127,9 +106,46 @@ pub async fn process_commits_in_range(
     Some((commits_summaries, count, git_memory_vec))
 }
 
+pub async fn process_commits_in_range_wrapped(
+    inp_vec: Vec<GitMemory>,
+) -> Option<(String, usize, Vec<GitMemory>)> {
+    let mut commits_summaries = String::new();
+    let mut git_memory_vec = vec![];
+    let mut inp_vec = inp_vec;
+    for commit_obj in inp_vec.drain(..) {
+        match analyze_commit(
+            &commit_obj.name,
+            &commit_obj.tag_line,
+            &commit_obj.html_url,
+        )
+        .await
+        {
+            Some(summary) => {
+                let mut commit_obj = commit_obj; // to make it mutable
+                commit_obj.payload = summary;
+
+                if commits_summaries.len() <= 45_000 {
+                    commits_summaries
+                        .push_str(&format!("{} {}\n", commit_obj.date, commit_obj.payload));
+                }
+
+                git_memory_vec.push(commit_obj);
+            }
+            None => {
+                log::error!(
+                    "Error analyzing commit {:?} for user {}",
+                    commit_obj.html_url,
+                    commit_obj.name
+                );
+            }
+        }
+    }
+
+    let count = git_memory_vec.len();
+    Some((commits_summaries, count, git_memory_vec))
+}
+
 pub async fn analyze_commit(
-    owner: &str,
-    repo: &str,
     user_name: &str,
     tag_line: &str,
     url: &str,
@@ -141,7 +157,7 @@ pub async fn analyze_commit(
         Some(res) => {
             let text = String::from_utf8_lossy(res.as_slice()).to_string();
 
-            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name} on the {repo} project. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements of the commit, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
+            let sys_prompt_1 = &format!("You are provided with a commit patch by the user {user_name}. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements of the commit, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements.");
 
             let usr_prompt_1 = &format!("Based on the provided commit patch: {text}, and description: {tag_line}, extract and present the following key elements: a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item.");
 

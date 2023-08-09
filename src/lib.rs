@@ -193,16 +193,10 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         _ => None,
                     });
 
-                    // let report = weekly_report(owner, repo, user_name, key).await;
-                    let now = Utc::now();
-                    let a_week_ago = now - Duration::days(7);
-                    let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-                    let (commits_summaries, commits_count, commits_vec) =
-                        process_commits_in_range(owner, repo, user_name, 7)
+                    let (commits_count, commits_vec) =
+                        get_commits_in_range(owner, repo, user_name, 7)
                             .await
                             .unwrap_or_default();
-
                     let resp = serde_json::json!({
                         "content": format!("{} commits processed", commits_count)
                     });
@@ -213,19 +207,21 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                         Ok(_) => {}
                         Err(_e) => log::error!("error sending commit count: {:?}", _e),
                     }
-                    let content = match commits_vec.last() {
-                        Some(tag) => tag.tag_line.to_string(),
-                        None => "No commits to report.".to_string(),
-                    };
+
+                    let (commits_summaries, _, _) =
+                        process_commits_in_range_wrapped(commits_vec)
+                            .await
+                            .unwrap_or_default();
+
                     let resp = serde_json::json!({
-                        "content": content
+                        "content": commits_summaries
                     });
                     match client
                         .edit_original_interaction_response(&ac.token, &resp)
                         .await
                     {
                         Ok(_) => {}
-                        Err(_e) => log::error!("error sending last commit tagline: {:?}", _e),
+                        Err(_e) => log::error!("error sending commit count: {:?}", _e),
                     }
 
                     let mut issues_summaries = String::new();
@@ -242,6 +238,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                             issues_summaries.push_str("\n");
                         }
                     }
+                    let now = Utc::now();
+                    let a_week_ago = now - Duration::days(7);
+                    let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
                     let discussion_query = format!(
                         "involves:{} updated:>{}",

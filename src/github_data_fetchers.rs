@@ -1,12 +1,105 @@
 use crate::octocrab_compat::{Issue, Repository, User};
 use crate::utils::*;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Utc, NaiveDate};
 use http_req::response::Response;
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use serde_json;
 use std::env;
 use store_flows::{get, set};
+use derivative::Derivative;
 
+#[derive(Derivative, Serialize, Deserialize, Debug)]
+pub struct GitMemory {
+    pub memory_type: MemoryType,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub name: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub tag_line: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub html_url: String,
+    #[derivative(Default(value = "String::from(\"\")"))]
+    pub payload: String,
+    pub date: NaiveDate,
+}
+#[derive(Serialize, Deserialize, Debug)]
+pub enum MemoryType {
+    Commit,
+    Issue,
+    Discussion,
+    Meta,
+}
+
+pub async fn get_commits_in_range(
+    owner: &str,
+    repo: &str,
+    user_name: Option<&str>,
+    range: u16,
+) -> Option<(usize, Vec<GitMemory>)> {
+    #[derive(Debug, Deserialize, Serialize)]
+    struct User {
+        login: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct GithubCommit {
+        sha: String,
+        html_url: String,
+        author: User,
+        committer: User,
+        commit: CommitDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitDetails {
+        author: CommitUserDetails,
+        message: String,
+        // committer: CommitUserDetails,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CommitUserDetails {
+        date: Option<DateTime<Utc>>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let author_str = match user_name {
+        Some(user_name) => format!("?author={}", user_name),
+        None => "".to_string(),
+    };
+
+    let commits_query_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/commits{author_str}",);
+
+    let mut git_memory_vec = vec![];
+    let now = Utc::now();
+    let n_days_ago = (now - Duration::days(range as i64)).date_naive();
+    match github_http_fetch(&github_token, &commits_query_url).await {
+        None => println!("Error fetching Page of commits"),
+        Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
+            Err(e) => println!("Error parsing commits object: {:?}", e),
+            Ok(commits_obj) => {
+                for commit in commits_obj {
+                    if let Some(commit_date) = &commit.commit.author.date {
+                        if commit_date.date_naive() > n_days_ago {
+                            
+                            git_memory_vec.push(GitMemory {
+                                memory_type: MemoryType::Commit,
+                                name: commit.author.login,
+                                tag_line: commit.commit.message,
+                                html_url: commit.html_url,
+                                payload: String::from(""),
+                                date: commit_date.date_naive(),
+                            });
+                        }
+                    }
+                }
+            }
+        },
+    }
+    let count = git_memory_vec.len();
+    Some((count, git_memory_vec))
+}
 pub async fn get_user_profile(user: &str) -> Option<User> {
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let user_profile_url = format!("https://api.github.com/users/{user}");
