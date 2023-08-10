@@ -39,14 +39,14 @@ pub async fn weekly_report(
 
 pub async fn new_contributor_report(owner: &str, repo: &str, user_name: &str) -> Option<String> {
     let mut home_repo_data = get_readme(owner, repo).await.unwrap_or("".to_string());
-    match get_community_profile_string(owner, repo).await {
+    match get_community_profile_data(owner, repo).await {
         Some(community_profile_data) => {
             home_repo_data.push_str(&community_profile_data);
         }
         None => {}
     };
     send_message_to_channel("ik8", "ch_home", home_repo_data.clone()).await;
-    let user_profile = get_user_by_login_string(user_name)
+    let user_profile = get_user_data_by_login(user_name)
         .await
         .unwrap_or("".to_string());
     send_message_to_channel("ik8", "ch_pro", user_profile.clone()).await;
@@ -69,9 +69,9 @@ pub async fn new_contributor_report(owner: &str, repo: &str, user_name: &str) ->
     send_message_to_channel("ik8", "ch_rep", repos_data.clone()).await;
 
     let discussion_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
-    let discussion_data = search_discussion(&discussion_query)
-        .await
-        .unwrap_or("".to_string());
+    let (_, discussion_vec) = search_discussions(&discussion_query).await.unwrap();
+
+    let (discussion_data, _) = analyze_discussions(discussion_vec, Some(user_name)).await;
     send_message_to_channel("ik8", "ch_dis", discussion_data.clone()).await;
 
     return correlate_user_and_home_project(
@@ -94,67 +94,9 @@ pub async fn current_contributor_report(
     // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
     // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
 
-    let (commits_summaries, commits_count, commits_vec) =
-        process_commits_in_range(owner, repo, Some(user_name), 7)
-            .await
-            .unwrap_or_default();
-
-    let mut issues_summaries = String::new();
-    let issues = get_user_issues_on_repo_last_n_days(owner, repo, user_name, 7)
-        .await
-        .unwrap_or(vec![]);
-
-    // for issue in issues {
-    //     if let Some(body) = analyze_issue(owner, repo, user_name, issue).await {
-    //         issues_summaries.push_str(&body);
-    //         issues_summaries.push_str("\n");
-    //     }
-    // }
-
-    let discussion_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
-    let discussion_data = search_discussion(&discussion_query)
-        .await
-        .unwrap_or("".to_string());
-    send_message_to_channel("ik8", "ch_dis", discussion_data.clone()).await;
-
-    return correlate_commits_issues(&commits_summaries, &issues_summaries).await;
+    Some("".to_string())
 }
 pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
-    let now = Utc::now();
-    let a_week_ago = now - Duration::days(7);
-    let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    // let issue_query = format!("involves:{user_name} updated:>{a_week_ago_str}");
-    // let issues_data = search_issue(&issue_query).await.unwrap_or("".to_string());
+    Some("".to_string())
 
-    let (commits_summaries, commits_count, commits_vec) = process_commits_in_range(owner, repo, None, 7)
-        .await
-        .unwrap_or_default();
-    send_message_to_channel("ik8", "ch_rep", commits_summaries.clone()).await;
-
-    let mut issues_summaries = String::new();
-    let issues = get_all_issues_on_repo_last_n_days(owner, repo, 7)
-        .await
-        .unwrap_or(vec![]);
-
-    for issue in issues {
-        let user_name = issue.user.login.clone();
-        // if let Some(body) = analyze_issue(owner, repo, &user_name, issue).await {
-        //     issues_summaries.push_str(&body);
-        //     issues_summaries.push_str("\n");
-        // }
-    }
-    send_message_to_channel("ik8", "ch_iss", issues_summaries.clone()).await;
-
-    let discussion_query = format!("updated:>{a_week_ago_str}");
-    let discussion_data = search_discussion(&discussion_query)
-        .await
-        .unwrap_or("".to_string());
-    send_message_to_channel("ik8", "ch_dis", discussion_data.clone()).await;
-
-    return correlate_commits_issues_discussions(
-        &commits_summaries,
-        &issues_summaries,
-        &discussion_data,
-    )
-    .await;
 }

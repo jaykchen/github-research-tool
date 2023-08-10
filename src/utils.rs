@@ -8,6 +8,36 @@ use serde_json::Value;
 use std::collections::HashSet;
 use store_flows::{get, set};
 
+/* 
+use crypto::{symmetriccipher, buffer, aes, blockmodes};
+use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
+use rand::Rng;
+
+use std::str;
+use hex::{encode, decode};
+use brotli::{BrotliCompress, BrotliDecompress};
+use std::io::{Read, Write};
+
+fn gen_key(url: &str, username: &str) -> String {
+    let combined = format!("{}+{}", url, username);
+    let encrypted_bytes = encrypt(combined.as_bytes(), KEY, IV).expect("Failed to encrypt");
+    hex::encode(&encrypted_bytes)
+}
+
+fn get_vals(hex_key: &str) -> (String, String) {
+    let encrypted_bytes = hex::decode(&hex_key).expect("Failed to decode hex");
+    let decrypted_bytes = decrypt(&encrypted_bytes, KEY, IV).expect("Failed to decrypt");
+    
+    let decrypted_str = str::from_utf8(&decrypted_bytes).unwrap();
+    let parts: Vec<&str> = decrypted_str.split('+').collect();
+    (parts[0].to_string(), parts[1].to_string())
+}
+
+
+
+ */
+
+
 pub fn squeeze_fit_commits_issues(commits: &str, issues: &str, split: f32) -> (String, String) {
     let mut commits_vec = commits.split_whitespace().collect::<Vec<&str>>();
     let commits_len = commits_vec.len();
@@ -27,7 +57,7 @@ pub fn squeeze_fit_commits_issues(commits: &str, issues: &str, split: f32) -> (S
     (commits_vec.join(" "), issues_vec.join(" "))
 }
 
-pub fn squeeze_fit_comment_texts(
+pub fn squeeze_fit_remove_quoted(
     inp_str: &str,
     quote_mark: &str,
     max_len: u16,

@@ -1,4 +1,4 @@
-use crate::octocrab_compat::{Issue, Repository, User, Comment};
+use crate::octocrab_compat::{Comment, Issue, Repository, User};
 use crate::utils::*;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use derivative::Derivative;
@@ -100,7 +100,7 @@ pub async fn get_issue_texts(issue: Issue) -> Option<String> {
     let issue_creator_name = issue.user.login;
     let issue_title = issue.title;
     let issue_body = match issue.body {
-        Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+        Some(body) => squeeze_fit_remove_quoted(&body, "```", 500, 0.6),
         None => "".to_string(),
     };
     let issue_url = issue.url.to_string();
@@ -112,7 +112,7 @@ pub async fn get_issue_texts(issue: Issue) -> Option<String> {
         .collect::<Vec<String>>()
         .join(", ");
 
-    let mut all_text_from_issue = format!("User '{issue_creator_name}', has submitted an issue titled '{issue_title}', labeled as '{labels}', with the following post: '{issue_body}'.");
+    let mut all_text_from_issue = format!("User '{issue_creator_name}', opened an issue titled '{issue_title}', labeled '{labels}', with the following post: '{issue_body}'.");
 
     let mut current_page = 1;
     loop {
@@ -134,7 +134,7 @@ pub async fn get_issue_texts(issue: Issue) -> Option<String> {
                     }
                     for comment in comments_obj {
                         let comment_body = match comment.body {
-                            Some(body) => squeeze_fit_comment_texts(&body, "```", 500, 0.6),
+                            Some(body) => squeeze_fit_remove_quoted(&body, "```", 500, 0.6),
                             None => "".to_string(),
                         };
                         let commenter = comment.user.login;
@@ -254,7 +254,7 @@ pub async fn get_user_profile(user: &str) -> Option<User> {
         }
     }
 }
-pub async fn get_user_by_login_string(login: &str) -> Option<String> {
+pub async fn get_user_data_by_login(login: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
     struct User {
         name: Option<String>,
@@ -374,7 +374,7 @@ pub async fn get_user_by_login_string(login: &str) -> Option<String> {
 
     Some(out)
 }
-pub async fn get_community_profile_string(owner: &str, repo: &str) -> Option<String> {
+pub async fn get_community_profile_data(owner: &str, repo: &str) -> Option<String> {
     #[derive(Deserialize, Debug)]
     struct CommunityProfile {
         description: String,
@@ -416,16 +416,10 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
                 match base64::decode(&cleaned_content) {
                     Ok(decoded_content) => {
                         match &String::from_utf8(decoded_content) {
-                            Ok(out) if out.len() > 3000 => {
-                                let truncated = out
-                                    .chars()
-                                    .take(1800)
-                                    .chain(out.chars().skip(out.chars().count() - 1200))
-                                    .collect::<String>();
-
+                            Ok(out) => {
+                                let truncated = squeeze_fit_remove_quoted(out, "```", 2000, 0.6);
                                 return Some(format!("Readme: {truncated}"));
                             }
-                            Ok(out) => return Some(format!("Readme: {out}")),
                             Err(_e) => {
                                 log::error!("failed to convert cleaned readme to String: {_e}");
                                 return None;
@@ -481,7 +475,7 @@ pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
             }) {
                 Some(set) => (true, set.len() as u16),
                 None => {
-                    log::error!("Error verifying contributors data in store");
+                    log::error!("Error verifying saved contributors data in store");
                     (false, 0_u16)
                 }
             }
@@ -570,199 +564,6 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     }
 
     Some(contributors)
-}
-
-pub async fn get_user_issues_on_repo_last_n_days(
-    owner: &str,
-    repo: &str,
-    user: &str,
-    n_days: u16,
-) -> Option<Vec<Issue>> {
-    #[derive(Debug, Deserialize)]
-    struct Page<T> {
-        pub items: Vec<T>,
-        pub total_count: Option<u64>,
-    }
-    let now = Utc::now();
-
-    let n_days_ago = now - Duration::days(n_days.into());
-    let n_days_ago_str = n_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let query = format!("repo:{owner}/{repo} involves:{user} updated:>{n_days_ago_str}");
-    let encoded_query = urlencoding::encode(&query);
-
-    let mut out: Vec<Issue> = vec![];
-    let mut total_pages = None;
-    let mut current_page = 1;
-    let mut count = 0;
-    loop {
-        let url_str = format!(
-            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
-        );
-
-        match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
-                Err(_e) => {
-                    log::error!("Error parsing Page<Issue>: {:?}", _e);
-                    break;
-                }
-                Ok(issue_page) => {
-                    if total_pages.is_none() {
-                        if let Some(count) = issue_page.total_count {
-                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
-                        }
-                    }
-
-                    for issue in issue_page.items {
-                        out.push(issue);
-                        count += 1;
-
-                        if count > 1 {
-                            break;
-                        }
-                    }
-
-                    current_page += 1;
-                    if current_page > total_pages.unwrap_or(usize::MAX) {
-                        break;
-                    }
-                }
-            },
-            None => break,
-        }
-    }
-
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
-pub async fn get_all_issues_on_repo_last_n_days(
-    owner: &str,
-    repo: &str,
-    n_days: u16,
-) -> Option<Vec<Issue>> {
-    #[derive(Debug, Deserialize)]
-    struct Page<T> {
-        pub items: Vec<T>,
-        pub total_count: Option<u64>,
-    }
-    let now = Utc::now();
-
-    let n_days_ago = now - Duration::days(n_days.into());
-    let n_days_ago_str = n_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let query = format!("repo:{owner}/{repo} is:issue -is:pr updated:>{n_days_ago_str}");
-    let encoded_query = urlencoding::encode(&query);
-
-    let mut out: Vec<Issue> = vec![];
-    let mut total_pages = None;
-    let mut current_page = 1;
-    let mut count = 0;
-    loop {
-        let url_str = format!(
-            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
-        );
-
-        match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
-                Err(_e) => {
-                    log::error!("Error parsing Page<Issue>: {:?}", _e);
-                    break;
-                }
-                Ok(issue_page) => {
-                    if total_pages.is_none() {
-                        if let Some(count) = issue_page.total_count {
-                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
-                        }
-                    }
-
-                    for issue in issue_page.items {
-                        out.push(issue);
-                        count += 1;
-
-                        if count > 1 {
-                            break;
-                        }
-                    }
-
-                    current_page += 1;
-                    if current_page > total_pages.unwrap_or(usize::MAX) {
-                        break;
-                    }
-                }
-            },
-            None => break,
-        }
-    }
-
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
-
-pub async fn get_user_issues_on_repo(owner: &str, repo: &str, user: &str) -> Option<Vec<Issue>> {
-    #[derive(Debug, Deserialize)]
-    struct Page<T> {
-        pub items: Vec<T>,
-        pub total_count: Option<u64>,
-    }
-
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let query = format!("repo:{owner}/{repo} involves:{user}");
-    let encoded_query = urlencoding::encode(&query);
-
-    let mut out: Vec<Issue> = vec![];
-    let mut total_pages = None;
-    let mut current_page = 1;
-    let mut count = 0;
-    loop {
-        let url_str = format!(
-            "https://api.github.com/search/issues?q={encoded_query}&sort=created&order=desc&page={current_page}"
-        );
-
-        match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
-                Err(_e) => {
-                    log::error!("Error parsing Page<Issue>: {:?}", _e);
-                    break;
-                }
-                Ok(issue_page) => {
-                    if total_pages.is_none() {
-                        if let Some(count) = issue_page.total_count {
-                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
-                        }
-                    }
-
-                    for issue in issue_page.items {
-                        out.push(issue);
-                        count += 1;
-
-                        if count > 99 {
-                            break;
-                        }
-                    }
-
-                    current_page += 1;
-                    if current_page > total_pages.unwrap_or(usize::MAX) {
-                        break;
-                    }
-                }
-            },
-            None => break,
-        }
-    }
-
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
 }
 
 pub async fn get_user_repos_in_language(user: &str, language: &str) -> Option<Vec<Repository>> {
@@ -1341,31 +1142,24 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
     Some(out)
 }
 
-pub async fn search_discussion(search_query: &str) -> Option<String> {
+pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMemory>)> {
     #[derive(Debug, Deserialize)]
     struct DiscussionRoot {
-        data: Option<DiscussionData>,
+        data: Option<Data>,
     }
 
     #[derive(Debug, Deserialize)]
-    struct DiscussionData {
-        search: Option<DiscussionSearch>,
+    struct Data {
+        search: Option<Search>,
     }
 
     #[derive(Debug, Deserialize)]
-    struct DiscussionSearch {
-        edges: Option<Vec<Option<DiscussionNode>>>,
-        pageInfo: Option<PageInfo>,
+    struct Search {
+        edges: Option<Vec<Option<Edge>>>,
     }
 
     #[derive(Debug, Deserialize)]
-    struct PageInfo {
-        hasNextPage: Option<bool>,
-        endCursor: Option<String>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct DiscussionNode {
+    struct Edge {
         node: Option<Discussion>,
     }
 
@@ -1373,103 +1167,159 @@ pub async fn search_discussion(search_query: &str) -> Option<String> {
     struct Discussion {
         title: Option<String>,
         url: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
-        upvoteCount: Option<i32>,
+        author: Option<Author>,
+        body: Option<String>,
+        comments: Option<Comments>,
+        createdAt: DateTime<Utc>,
+        upvoteCount: Option<u32>,
     }
+
+    #[derive(Debug, Deserialize)]
+    struct Comments {
+        edges: Option<Vec<Option<CommentEdge>>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct CommentEdge {
+        node: Option<CommentNode>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct CommentNode {
+        author: Option<Author>,
+        body: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Author {
+        login: Option<String>,
+    }
+
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let base_url = "https://api.github.com/graphql";
-    let mut out = String::from("DISCUSSION: \n");
+    let mut results_list: Vec<String> = Vec::new();
 
-    let mut cursor: Option<String> = None;
-
-    loop {
-        let query = format!(
-            r#"
-            query {{
-                search(query: "{search_query}", type: DISCUSSION, first: 100{after}) {{
-                    edges {{
-                        node {{
-                            ... on Discussion {{
-                                title
-                                url
-                                createdAt
-                                upvoteCount
+    let query = format!(
+        r#"
+        query {{
+            search(query: "{search_query}", type: DISCUSSION, first: 100) {{
+                edges {{
+                    node {{
+                        ... on Discussion {{
+                            title
+                            url
+                            body
+                            author {{
+                                login
+                            }}
+                            createdAt
+                            upvoteCount
+                            comments (first: 100) {{
+                                edges {{
+                                    node {{
+                                        author {{
+                                            login
+                                        }}
+                                        body
+                                    }}
+                                }}
                             }}
                         }}
                     }}
-                    pageInfo {{
-                        hasNextPage
-                        endCursor
-                    }}
                 }}
             }}
-            "#,
-            search_query = search_query,
-            after = cursor
-                .as_ref()
-                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
-        );
-
-        match github_http_post(&github_token, base_url, &query).await {
-            None => {
-                log::error!(
-                    "Failed to send the request to get DiscussionRoot: {}",
-                    base_url
-                );
+        }}
+        "#,
+        search_query = search_query
+    );
+    let mut git_mem_vec = Vec::with_capacity(100);
+    match github_http_post(&github_token, base_url, &query).await {
+        None => {
+            log::error!(
+                "Failed to send the request to get DiscussionRoot: {}",
+                base_url
+            );
+            return None;
+        }
+        Some(response) => match serde_json::from_slice::<DiscussionRoot>(&response) {
+            Err(e) => {
+                log::error!("Failed to parse the response for DiscussionRoot: {}", e);
                 return None;
             }
-            Some(response) => match serde_json::from_slice::<DiscussionRoot>(response.as_slice()) {
-                Err(e) => {
-                    log::error!("Failed to parse the response for DiscussionRoot: {}", e);
-                    return None;
-                }
-                Ok(results) => {
-                    if let Some(search) = &results.data?.search {
-                        if let Some(edges) = &search.edges {
-                            for edge_option in edges {
-                                if let Some(discussion_node) = edge_option {
-                                    if let Some(discussion) = &discussion_node.node {
-                                        let date = match &discussion.createdAt {
-                                            Some(date) => date.date_naive().to_string(),
-                                            None => continue,
-                                        };
+            Ok(results) => {
+                let empty_str = "".to_string();
 
-                                        let title_str = match &discussion.title {
-                                            Some(title) => format!("Title: {},", title),
-                                            None => String::new(),
-                                        };
+                if let Some(search) = results.data?.search {
+                    for edge_option in search.edges?.iter().filter_map(|e| e.as_ref()) {
+                        if let Some(discussion) = &edge_option.node {
+                            let date = discussion.createdAt.date_naive();
+                            let title = discussion.title.as_ref().unwrap_or(&empty_str).to_string();
+                            let url = discussion.url.as_ref().unwrap_or(&empty_str).to_string();
+                            let author_login = discussion
+                                .author
+                                .as_ref()
+                                .and_then(|a| a.login.as_ref())
+                                .unwrap_or(&empty_str)
+                                .to_string();
 
-                                        let url_str = match &discussion.url {
-                                            Some(u) => format!("Url: {}", u),
-                                            None => String::new(),
-                                        };
+                            let upvotes_str = match discussion.upvoteCount {
+                                Some(c) if c > 0 => format!("Upvotes: {}", c),
+                                _ => "".to_string(),
+                            };
 
-                                        let upvotes_str = match discussion.upvoteCount {
-                                            Some(count) => format!("Upvotes: {}", count),
-                                            None => String::new(),
-                                        };
+                            let mut payload = String::new();
+                            payload.push_str(&format!(
+                                "Title: '{}' Url: '{}' Body: '{}' Created At: {} {} Author: {}\n",
+                                title,
+                                url,
+                                discussion.body.as_ref().unwrap_or(&empty_str),
+                                date,
+                                upvotes_str,
+                                author_login
+                            ));
 
-                                        out.push_str(&format!(
-                                            "{title_str} {url_str} Created At: {date} {upvotes_str}\n"
-                                        ));
+                            if let Some(comments) = &discussion.comments {
+                                if let Some(ref edges) = comments.edges {
+                                    for comment_edge_option in
+                                        edges.iter().filter_map(|e| e.as_ref())
+                                    {
+                                        if let Some(comment) = &comment_edge_option.node {
+                                            let one_comment_text = format!(
+                                                "{} comments: '{}'\n",
+                                                comment
+                                                    .author
+                                                    .as_ref()
+                                                    .and_then(|a| a.login.as_ref())
+                                                    .unwrap_or(&empty_str),
+                                                comment.body.as_ref().unwrap_or(&empty_str)
+                                            );
+                                            payload.push_str(&one_comment_text);
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if let Some(page_info) = &search.pageInfo {
-                            if page_info.hasNextPage.unwrap_or(false) {
-                                cursor = page_info.endCursor.clone();
-                            } else {
-                                break;
-                            }
+
+                            git_mem_vec.push(GitMemory {
+                                memory_type: MemoryType::Discussion,
+                                name: author_login,
+                                tag_line: title,
+                                source_url: url,
+                                payload: payload,
+                                date: date,
+                            })
                         }
                     }
                 }
-            },
-        };
+            }
+        },
     }
 
-    Some(out)
+    if git_mem_vec.is_empty() {
+        None
+    } else {
+        let count = git_mem_vec.len();
+        Some((count, git_mem_vec))
+    }
 }
 
 pub async fn search_users(search_query: &str) -> Option<String> {
