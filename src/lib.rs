@@ -155,17 +155,17 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
 
     let (commits_summaries, _, _) = process_commits(commits_vec).await.unwrap();
 
-    let resp = serde_json::json!({
-        "content": commits_summaries.chars().take(2000).collect::<String>()
-    });
+    // let resp = serde_json::json!({
+    //     "content": commits_summaries.chars().take(2000).collect::<String>()
+    // });
 
-    match client
-        .edit_original_interaction_response(&ac.token, &resp)
-        .await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
-    }
+    // match client
+    //     .edit_original_interaction_response(&ac.token, &resp)
+    //     .await
+    // {
+    //     Ok(_) => {}
+    //     Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
+    // }
 
     let (count, issue_vec) = get_issues_in_range(&owner, &repo, user_name, 7)
         .await

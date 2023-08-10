@@ -51,7 +51,7 @@ pub async fn get_issues_in_range(
     let user_str = user_name
         .map(|u| format!("involves:{}", u))
         .unwrap_or_default();
-    log::error!("user_str: {}", user_str);
+
     let query = format!("repo:{owner}/{repo} is:issue {user_str} updated:>{n_days_ago}");
     let encoded_query = urlencoding::encode(&query);
 
