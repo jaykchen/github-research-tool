@@ -10,6 +10,7 @@ use discord_flows::model::interactions::application_command::{
     ApplicationCommand, ApplicationCommandInteraction,
 };
 use discord_flows::{
+    http::Http,
     model::{application_command::CommandDataOptionValue, channel, guild, Interaction},
     Bot, EventModel, ProvidedBot,
 };
@@ -34,7 +35,7 @@ pub async fn run() {
     bot.listen(|em| handle(&bot, em)).await;
 }
 
-async fn handle<B: Bot>(bot: &B, em: EventModel) {
+/* async fn handle<B: Bot>(bot: &B, em: EventModel) {
     let client = bot.get_client();
     match em {
         EventModel::ApplicationCommand(ac) => {
@@ -68,10 +69,45 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
             // keep it empty for now
         }
     }
+} */
+
+async fn handle<B: Bot>(bot: &B, em: EventModel) {
+    let client = bot.get_client();
+    match em {
+        EventModel::ApplicationCommand(ac) => {
+            let initial_response = serde_json::json!(
+                {
+                    "type": 4,
+                    "data": {
+                        "content": "Bot is pulling data for you, please wait."
+                    }
+                }
+            );
+            _ = client
+                .create_interaction_response(ac.id.into(), &ac.token, &initial_response)
+                .await;
+            client.set_application_id(ac.application_id.into());
+
+            match ac.data.name.as_str() {
+                "weekly_report" => {
+                    handle_weekly_report(bot, &client, ac).await;
+                }
+                "get_user_repos" => {
+                    // handle_get_user_repos(bot, &client, ac).await;
+                }
+                "search" => {
+                    // handle_search(bot, &client, ac).await;
+                }
+                _ => {}
+            }
+        }
+        EventModel::Message(_) => {
+            // keep it empty for now
+        }
+    }
 }
 
-async fn handle_weekly_report<B: Bot>(bot: &B, ac: ApplicationCommandInteraction) {
-    let client = bot.get_client();
+async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
 
     let owner = match options
@@ -195,9 +231,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, ac: ApplicationCommandInteraction
     }
 }
 
-async fn handle_search<B: Bot>(bot: &B, ac: ApplicationCommandInteraction) {
-    let client = bot.get_client();
-
+async fn handle_search<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
 
     let search_query = match options
@@ -250,12 +284,9 @@ async fn handle_search<B: Bot>(bot: &B, ac: ApplicationCommandInteraction) {
     }
 }
 
-async fn handle_get_user_repos<B: Bot>(bot: &B, ac: ApplicationCommandInteraction) {
-    let client = bot.get_client();
-
+async fn handle_get_user_repos<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
 
-    // Extracting the username and language from options
     let username = match options
         .get(0)
         .expect("Expected username option")
