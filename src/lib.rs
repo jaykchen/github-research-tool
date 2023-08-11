@@ -141,6 +141,13 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         .await
         .unwrap_or_default();
 
+    let head = commits_vec[0]
+        .payload
+        .chars()
+        .take(1000)
+        .collect::<String>();
+    send_message_to_channel("ik8", "ch_rep", head).await;
+
     let resp = serde_json::json!({
         "content": format!("processing {} commits", commits_count)
     });
@@ -166,6 +173,8 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     //     Ok(_) => {}
     //     Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
     // }
+    let head = commits_summaries.chars().take(1000).collect::<String>();
+    send_message_to_channel("ik8", "ch_rep", head).await;
 
     let (count, issue_vec) = get_issues_in_range(&owner, &repo, user_name, 7)
         .await
@@ -184,6 +193,9 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     }
 
     let (issues_summaries, _, _) = process_issues(issue_vec, user_name).await.unwrap();
+
+    let head = issues_summaries.chars().take(1000).collect::<String>();
+    send_message_to_channel("ik8", "ch_iss", head).await;
 
     let now = Utc::now();
     let a_week_ago = now - Duration::days(7);
@@ -209,6 +221,9 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     }
 
     let (discussion_data, _) = analyze_discussions(discussion_vec, user_name).await;
+    let head = discussion_data.chars().take(1000).collect::<String>();
+    send_message_to_channel("ik8", "ch_dis", head).await;
+
     let resp_content = correlate_commits_issues_discussions(
         &commits_summaries,
         &issues_summaries,
@@ -217,6 +232,11 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     .await;
 
     let resp_content = resp_content.unwrap_or("Failed to generate report.".to_string());
+    let head = resp_content
+        .chars()
+        .take(1000)
+        .collect::<String>();
+    send_message_to_channel("ik8", "ch_home", head).await;
 
     let resp = serde_json::json!({
         "content": resp_content.to_string()
