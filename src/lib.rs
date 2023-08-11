@@ -18,6 +18,7 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
+use github_flows::octocrab::commits;
 use reports::*;
 use serde_json;
 use slack_flows::send_message_to_channel;
@@ -109,7 +110,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
 async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
-    let mut n_days = 7;
+    let mut n_days = 7u16;
     let owner = match options
         .get(0)
         .expect("Expected owner option")
@@ -137,14 +138,19 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         _ => None,
     });
 
-    let (commits_count, commits_vec) = match get_commits_in_range(&owner, &repo, user_name, 7).await
-    {
-        Some(res) => res,
-        None => {
-            n_days = 30;
-            (0, vec![])
-        }
+    let (mut commits_count, mut commits_vec) = (0, vec![]);
+
+    match get_commits_in_range(&owner, &repo, user_name, n_days).await {
+        Some(res) => (commits_count, commits_vec) = res,
+        None => n_days = 30,
     };
+
+    if commits_count == 0 {
+        match get_commits_in_range(&owner, &repo, user_name, n_days).await {
+            Some(res) => (commits_count, commits_vec) = res,
+            None => {}
+        };
+    }
     // let head = commits_vec[0]
     //     .payload
     //     .chars()
@@ -186,7 +192,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     // let head = commits_summaries.chars().take(1000).collect::<String>();
     // send_message_to_channel("ik8", "ch_rep", head).await;
 
-    let (count, issue_vec) = match get_issues_in_range(&owner, &repo, user_name, 7).await {
+    let (count, issue_vec) = match get_issues_in_range(&owner, &repo, user_name, n_days).await {
         Some(res) => res,
         None => (0, vec![]),
     };
@@ -215,7 +221,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     // send_message_to_channel("ik8", "ch_iss", head).await;
 
     let now = Utc::now();
-    let a_week_ago = now - Duration::days(n_days);
+    let a_week_ago = now - Duration::days(n_days as i64);
     let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let discussion_query = format!(
