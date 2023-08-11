@@ -2,14 +2,14 @@ use discord_flows::http::HttpBuilder;
 use serde_json;
 use std::env;
 
-pub async fn register_once(discord_token: &str) {
-    let mut registered = false;
+// pub async fn register_once(discord_token: &str) {
+//     let mut registered = false;
 
-    let discord_token = env::var("discord_token").unwrap();
-    if !registered {
-        register_commands(&discord_token).await;
-    }
-}
+//     let discord_token = env::var("discord_token").unwrap();
+//     if !registered {
+//         register_commands(&discord_token).await;
+//     }
+// }
 
 pub async fn register_commands(discord_token: &str) -> bool {
     let command_weekly_report = serde_json::json!({

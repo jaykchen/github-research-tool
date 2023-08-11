@@ -18,7 +18,6 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
-use github_flows::octocrab::commits;
 use reports::*;
 use serde_json;
 use slack_flows::send_message_to_channel;
@@ -30,47 +29,16 @@ pub async fn run() {
     dotenv().ok();
     logger::init();
     let discord_token = env::var("discord_token").unwrap();
-    // let _ = register_once(&discord_token).await;
+
+    // register discord slash command, only need to run once after deployment
+    // the author hasn't figured out how to achieve the run once in programs' lifetime,
+    // you need to disable this line after first successful run
+    // compile the program again and run it again.
+    let _ = register_commands(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
 }
-
-/* async fn handle<B: Bot>(bot: &B, em: EventModel) {
-    let client = bot.get_client();
-    match em {
-        EventModel::ApplicationCommand(ac) => {
-            let initial_response = serde_json::json!(
-                {
-                    "type": 4,
-                    "data": {
-                        "content": "Bot is pulling data for you, please wait."
-                    }
-                }
-            );
-            _ = client
-                .create_interaction_response(ac.id.into(), &ac.token, &initial_response)
-                .await;
-            client.set_application_id(ac.application_id.into());
-
-            match ac.data.name.as_str() {
-                "weekly_report" => {
-                    handle_weekly_report(bot, ac).await;
-                }
-                "get_user_repos" => {
-                    // handle_get_user_repos(bot, ac).await;
-                }
-                "search" => {
-                    // handle_search(bot, ac).await;
-                }
-                _ => {}
-            }
-        }
-        EventModel::Message(msg) => {
-            // keep it empty for now
-        }
-    }
-} */
 
 async fn handle<B: Bot>(bot: &B, em: EventModel) {
     let client = bot.get_client();
@@ -80,7 +48,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 {
                     "type": 4,
                     "data": {
-                        "content": "Bot is pulling data for you,🤖⏳ please wait."
+                        "content": "🤖 ready."
                     }
                 }
             );
@@ -138,87 +106,96 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         _ => None,
     });
 
-    let (mut commits_count, mut commits_vec) = (0, vec![]);
+    let addressee_str = user_name.map_or(String::from("key community participants'"), |n| {
+        format!("{n}'s")
+    });
+
+    let start_msg_str =
+        format!("exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project");
+    match client
+        .edit_original_interaction_response(
+            &ac.token,
+            &(serde_json::json!({
+                "content": start_msg_str
+            })),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(_e) => log::error!("error sending start_msg_str: {:?}", _e),
+    }
+
+    let mut commits_summaries = String::from("");
 
     match get_commits_in_range(&owner, &repo, user_name, n_days).await {
-        Some(res) => (commits_count, commits_vec) = res,
-        None => n_days = 30,
+        Some((count, commits_vec)) => {
+            let commits_str = commits_vec
+                .iter()
+                .map(|com| {
+                    com.source_url
+                        .rsplitn(2, '/')
+                        .nth(0)
+                        .unwrap_or("1234567")
+                        .chars()
+                        .take(7)
+                        .collect::<String>()
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+            let commits_msg_str = format!("found {count} commits: {commits_str}");
+
+            match client
+                .edit_original_interaction_response(
+                    &ac.token,
+                    &(serde_json::json!({
+                        "content": commits_msg_str
+                    })),
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(_e) => log::error!("error sending commit count: {:?}", _e),
+            }
+
+            match process_commits(commits_vec).await {
+                Some((a, _,_)) => commits_summaries = a,
+                None => {}
+            };
+        }
+        None => {}
     };
 
-    if commits_count == 0 {
-        match get_commits_in_range(&owner, &repo, user_name, n_days).await {
-            Some(res) => (commits_count, commits_vec) = res,
-            None => {}
-        };
+    let mut issues_summaries = String::from("");
+
+    match get_issues_in_range(&owner, &repo, user_name, n_days).await {
+        Some((count, issue_vec)) => {
+            let issues_str = issue_vec
+                .iter()
+                .map(|issue| issue.url.rsplitn(2, '/').nth(0).unwrap_or("1234"))
+                .collect::<Vec<&str>>()
+                .join(", ");
+            let issues_msg_str = format!("found {} issues: {}", count, issues_str);
+
+            match client
+                .edit_original_interaction_response(
+                    &ac.token,
+                    &(serde_json::json!({
+                        "content": issues_msg_str
+                    })),
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(_e) => log::error!("error sending issues count: {:?}", _e),
+            }
+
+            match process_issues(issue_vec, user_name).await {
+                Some((summary, _, _)) => issues_summaries = summary,
+                None => {}
+            };
+        }
+        None => {} // Handle the case where get_issues_in_range returns None if needed
     }
-    // let head = commits_vec[0]
-    //     .payload
-    //     .chars()
-    //     .take(1000)
-    //     .collect::<String>();
-    // send_message_to_channel("ik8", "ch_rep", head).await;
-
-    let resp = serde_json::json!({
-        "content": format!("processing {} commits", commits_count)
-    });
-
-    match client
-        .edit_original_interaction_response(&ac.token, &resp)
-        .await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending commit count: {:?}", _e),
-    }
-
-    let (commits_summaries, _, gm_vec) = match commits_vec.is_empty() {
-        true => (String::from(""), 0, vec![]),
-        false => match process_commits(commits_vec).await {
-            Some(res) => res,
-            None => (String::from(""), 0, vec![]),
-        },
-    };
-
-    // let resp = serde_json::json!({
-    //     "content": gm_vec[0].payload
-    // });
-
-    // match client
-    //     .edit_original_interaction_response(&ac.token, &resp)
-    //     .await
-    // {
-    //     Ok(_) => {}
-    //     Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
-    // }
-    // let head = commits_summaries.chars().take(1000).collect::<String>();
-    // send_message_to_channel("ik8", "ch_rep", head).await;
-
-    let (count, issue_vec) = match get_issues_in_range(&owner, &repo, user_name, n_days).await {
-        Some(res) => res,
-        None => (0, vec![]),
-    };
-
-    let resp = serde_json::json!({
-        "content": format!("{} issues pulled", count)
-    });
-
-    match client
-        .edit_original_interaction_response(&ac.token, &resp)
-        .await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending issues count: {:?}", _e),
-    }
-
-    let (issues_summaries, _, _) = match issue_vec.is_empty() {
-        true => (String::from(""), 0, vec![]),
-        false => match process_issues(issue_vec, user_name).await {
-            Some(res) => res,
-            None => (String::from(""), 0, vec![]),
-        },
-    };
-
-    // let head = issues_summaries.chars().take(1000).collect::<String>();
-    // send_message_to_channel("ik8", "ch_iss", head).await;
 
     let now = Utc::now();
     let a_week_ago = now - Duration::days(n_days as i64);
@@ -230,29 +207,40 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         a_week_ago_str
     );
 
-    let (discussion_count, discussion_vec) = match search_discussions(&discussion_query).await {
-        Some(res) => res,
-        None => (0, vec![]),
-    };
+    let mut discussion_data = String::from("");
 
-    let resp = serde_json::json!({
-        "content": format!("processing {} discussions", discussion_count)
-    });
+    match search_discussions(&discussion_query).await {
+        Some((count, discussion_vec)) => {
+            let discussions_str = discussion_vec
+                .iter()
+                .map(|discussion| {
+                    discussion
+                        .source_url
+                        .rsplitn(2, '/')
+                        .nth(0)
+                        .unwrap_or("1234")
+                })
+                .collect::<Vec<&str>>()
+                .join(", ");
+            let discussions_msg_str = format!("found {} discussions: {}", count, discussions_str);
 
-    match client
-        .edit_original_interaction_response(&ac.token, &resp)
-        .await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending discussions count: {:?}", _e),
+            match client
+                .edit_original_interaction_response(
+                    &ac.token,
+                    &(serde_json::json!({
+                        "content": discussions_msg_str
+                    })),
+                )
+                .await
+            {
+                Ok(_) => {}
+                Err(_e) => log::error!("error sending discussions message: {:?}", _e),
+            }
+
+            discussion_data = analyze_discussions(discussion_vec, user_name).await.0;
+        }
+        None => {} // Handle the case where search_discussions returns None if needed
     }
-
-    let (discussion_data, _) = match discussion_vec.is_empty() {
-        true => (String::from(""), vec![]),
-        false => analyze_discussions(discussion_vec, user_name).await,
-    };
-    // let head = discussion_data.chars().take(1000).collect::<String>();
-    // send_message_to_channel("ik8", "ch_dis", head).await;
 
     let resp_content = correlate_commits_issues_discussions(
         &commits_summaries,
@@ -261,15 +249,16 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     )
     .await
     .unwrap_or("Failed to generate report.".to_string());
-    let head = resp_content.chars().take(1000).collect::<String>();
-    send_message_to_channel("ik8", "ch_home", head).await;
-
-    let resp = serde_json::json!({
-        "content": resp_content.to_string()
-    });
+    // let head = resp_content.chars().take(1000).collect::<String>();
+    // send_message_to_channel("ik8", "ch_home", head).await;
 
     match client
-        .edit_original_interaction_response(&ac.token, &resp)
+        .edit_original_interaction_response(
+            &ac.token,
+            &(serde_json::json!({
+                "content": resp_content.to_string()
+            })),
+        )
         .await
     {
         Ok(_) => {}

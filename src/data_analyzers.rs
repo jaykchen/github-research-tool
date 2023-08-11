@@ -1,10 +1,7 @@
 use crate::github_data_fetchers::*;
 use crate::octocrab_compat::Issue;
 use crate::utils::*;
-use chrono::{DateTime, Duration, Utc};
 use log;
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::env;
 
 pub async fn process_issues(
