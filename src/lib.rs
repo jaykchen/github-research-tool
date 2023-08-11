@@ -109,7 +109,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 
 async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
-
+    let mut n_days = 7;
     let owner = match options
         .get(0)
         .expect("Expected owner option")
@@ -140,7 +140,10 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     let (commits_count, commits_vec) = match get_commits_in_range(&owner, &repo, user_name, 7).await
     {
         Some(res) => res,
-        None => (0, vec![]),
+        None => {
+            n_days = 30;
+            (0, vec![])
+        }
     };
     // let head = commits_vec[0]
     //     .payload
@@ -212,7 +215,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     // send_message_to_channel("ik8", "ch_iss", head).await;
 
     let now = Utc::now();
-    let a_week_ago = now - Duration::days(7);
+    let a_week_ago = now - Duration::days(n_days);
     let a_week_ago_str = a_week_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let discussion_query = format!(
