@@ -79,7 +79,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
                 {
                     "type": 4,
                     "data": {
-                        "content": "Bot is pulling data for you, please wait."
+                        "content": "Bot is pulling data for you,🤖⏳ please wait."
                     }
                 }
             );
@@ -137,16 +137,17 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         _ => None,
     });
 
-    let (commits_count, commits_vec) = get_commits_in_range(&owner, &repo, user_name, 7)
-        .await
-        .unwrap_or_default();
-
-    let head = commits_vec[0]
-        .payload
-        .chars()
-        .take(1000)
-        .collect::<String>();
-    send_message_to_channel("ik8", "ch_rep", head).await;
+    let (commits_count, commits_vec) = match get_commits_in_range(&owner, &repo, user_name, 7).await
+    {
+        Some(res) => res,
+        None => (0, vec![]),
+    };
+    // let head = commits_vec[0]
+    //     .payload
+    //     .chars()
+    //     .take(1000)
+    //     .collect::<String>();
+    // send_message_to_channel("ik8", "ch_rep", head).await;
 
     let resp = serde_json::json!({
         "content": format!("processing {} commits", commits_count)
@@ -160,10 +161,13 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         Err(_e) => log::error!("error sending commit count: {:?}", _e),
     }
 
-    let (commits_summaries, _, _) = process_commits(commits_vec).await.unwrap();
+    let (commits_summaries, _, gm_vec) = match process_commits(commits_vec).await {
+        Some(res) => res,
+        None => (String::from(""), 0, vec![]),
+    };
 
     // let resp = serde_json::json!({
-    //     "content": commits_summaries.chars().take(2000).collect::<String>()
+    //     "content": gm_vec[0].payload
     // });
 
     // match client
@@ -173,12 +177,13 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     //     Ok(_) => {}
     //     Err(_e) => log::error!("error sending commit summaries: {:?}", _e),
     // }
-    let head = commits_summaries.chars().take(1000).collect::<String>();
-    send_message_to_channel("ik8", "ch_rep", head).await;
+    // let head = commits_summaries.chars().take(1000).collect::<String>();
+    // send_message_to_channel("ik8", "ch_rep", head).await;
 
-    let (count, issue_vec) = get_issues_in_range(&owner, &repo, user_name, 7)
-        .await
-        .unwrap();
+    let (count, issue_vec) = match get_issues_in_range(&owner, &repo, user_name, 7).await {
+        Some(res) => res,
+        None => (0, vec![]),
+    };
 
     let resp = serde_json::json!({
         "content": format!("{} issues pulled", count)
@@ -192,10 +197,13 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         Err(_e) => log::error!("error sending issues count: {:?}", _e),
     }
 
-    let (issues_summaries, _, _) = process_issues(issue_vec, user_name).await.unwrap();
+    let (issues_summaries, _, _) = match process_issues(issue_vec, user_name).await {
+        Some(res) => res,
+        None => (String::from(""), 0, vec![]),
+    };
 
-    let head = issues_summaries.chars().take(1000).collect::<String>();
-    send_message_to_channel("ik8", "ch_iss", head).await;
+    // let head = issues_summaries.chars().take(1000).collect::<String>();
+    // send_message_to_channel("ik8", "ch_iss", head).await;
 
     let now = Utc::now();
     let a_week_ago = now - Duration::days(7);
@@ -207,7 +215,11 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         a_week_ago_str
     );
 
-    let (discussion_count, discussion_vec) = search_discussions(&discussion_query).await.unwrap();
+    let (discussion_count, discussion_vec) = match search_discussions(&discussion_query).await {
+        Some(res) => res,
+        None => (0, vec![]),
+    };
+
     let resp = serde_json::json!({
         "content": format!("processing {} discussions", discussion_count)
     });
@@ -220,22 +232,21 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         Err(_e) => log::error!("error sending discussions count: {:?}", _e),
     }
 
-    let (discussion_data, _) = analyze_discussions(discussion_vec, user_name).await;
-    let head = discussion_data.chars().take(1000).collect::<String>();
-    send_message_to_channel("ik8", "ch_dis", head).await;
+    let (discussion_data, _) = match discussion_vec.is_empty() {
+        true => (String::from(""), vec![]),
+        false => analyze_discussions(discussion_vec, user_name).await,
+    };
+    // let head = discussion_data.chars().take(1000).collect::<String>();
+    // send_message_to_channel("ik8", "ch_dis", head).await;
 
     let resp_content = correlate_commits_issues_discussions(
         &commits_summaries,
         &issues_summaries,
         &discussion_data,
     )
-    .await;
-
-    let resp_content = resp_content.unwrap_or("Failed to generate report.".to_string());
-    let head = resp_content
-        .chars()
-        .take(1000)
-        .collect::<String>();
+    .await
+    .unwrap_or("Failed to generate report.".to_string());
+    let head = resp_content.chars().take(1000).collect::<String>();
     send_message_to_channel("ik8", "ch_home", head).await;
 
     let resp = serde_json::json!({
