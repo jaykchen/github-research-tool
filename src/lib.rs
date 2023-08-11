@@ -161,9 +161,12 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         Err(_e) => log::error!("error sending commit count: {:?}", _e),
     }
 
-    let (commits_summaries, _, gm_vec) = match process_commits(commits_vec).await {
-        Some(res) => res,
-        None => (String::from(""), 0, vec![]),
+    let (commits_summaries, _, gm_vec) = match commits_vec.is_empty() {
+        true => (String::from(""), 0, vec![]),
+        false => match process_commits(commits_vec).await {
+            Some(res) => res,
+            None => (String::from(""), 0, vec![]),
+        },
     };
 
     // let resp = serde_json::json!({
@@ -197,9 +200,12 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         Err(_e) => log::error!("error sending issues count: {:?}", _e),
     }
 
-    let (issues_summaries, _, _) = match process_issues(issue_vec, user_name).await {
-        Some(res) => res,
-        None => (String::from(""), 0, vec![]),
+    let (issues_summaries, _, _) = match issue_vec.is_empty() {
+        true => (String::from(""), 0, vec![]),
+        false => match process_issues(issue_vec, user_name).await {
+            Some(res) => res,
+            None => (String::from(""), 0, vec![]),
+        },
     };
 
     // let head = issues_summaries.chars().take(1000).collect::<String>();
