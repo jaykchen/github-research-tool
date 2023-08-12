@@ -123,7 +123,6 @@ pub async fn correlate_commits_issues_discussions(
     _discussions_summary: Option<&str>,
     target_person: Option<&str>,
 ) -> Option<String> {
-
     let total_space = 16000; // 16k tokens
     let num_present_data = [_commits_summary, _issues_summary, _discussions_summary]
         .iter()
@@ -136,23 +135,29 @@ pub async fn correlate_commits_issues_discussions(
         0
     };
 
-    let trim_to_allocated_space = |source: &str| -> String {
-        source.chars().take(allocated_space_per_data * 3).collect()
-    };
+    let trim_to_allocated_space =
+        |source: &str| -> String { source.chars().take(allocated_space_per_data * 3).collect() };
 
-    let commits_str = _commits_summary.map_or("".to_string(), |x| format!("commit logs: {}", trim_to_allocated_space(x)));
-    let issues_str = _issues_summary.map_or("".to_string(), |x| format!("issue post: {}", trim_to_allocated_space(x)));
-    let discussions_str = _discussions_summary.map_or("".to_string(), |x| format!("discussion posts: {}", trim_to_allocated_space(x)));
-    
+    let commits_str = _commits_summary.map_or("".to_string(), |x| {
+        format!("commit logs: {}", trim_to_allocated_space(x))
+    });
+    let issues_str = _issues_summary.map_or("".to_string(), |x| {
+        format!("issue post: {}", trim_to_allocated_space(x))
+    });
+    let discussions_str = _discussions_summary.map_or("".to_string(), |x| {
+        format!("discussion posts: {}", trim_to_allocated_space(x))
+    });
+
     let target_str = match target_person {
         Some(person) => format!("{}'s", person),
         None => "key participants'".to_string(),
     };
 
-    let sys_prompt_1 = "Analyze data derived from users' activities on a given GitHub repository to identify and quantify impactful contributions. Focus on specific changes, improvements, or resolutions. Provide a bullet-point analysis for each member, emphasizing their distinct contributions and measurable impact on the project.";
-    let usr_prompt_1 = &format!("Given {commits_str}, {issues_str}, {discussions_str}, identify {target_str} contributions. List down the specific tasks, enhancements, or resolutions made by each individual. Ensure the focus is on concrete and impactful contributions that each member brought to the project.");
+    let sys_prompt_1 = "Analyze the GitHub activity data over the week to detect both key impactful contributions and connections between commits, issues, and discussions. Highlight specific code changes, resolutions, and improvements. Furthermore, trace evidence of commits addressing specific issues, discussions leading to commits, or issues spurred by discussions. The aim is to map out both the impactful technical advancements and the developmental narrative of the project.";
 
-    let usr_prompt_2 = &format!("Now, synthesize the analyses into a summary. Describe how {target_str} contributions fit into the project's progression and objectives. Focus on collaboration, interplay, and collective impact. Mention themes or patterns observed. Reflect both individual efforts and their combined influence on project advancement. Limit to 256 tokens." );
+    let usr_prompt_1 = &format!("From {commits_str}, {issues_str}, and {discussions_str}, detail {target_str}'s significant technical contributions. Enumerate individual tasks, code enhancements, and bug resolutions, emphasizing impactful contributions. Concurrently, identify connections: commits that appear to resolve specific issues, discussions that may have catalyzed certain commits, or issues influenced by preceding discussions. Extract tangible instances showcasing both impact and interconnections within the week.");
+
+    let usr_prompt_2 = &format!("Merge the identified impactful technical contributions and their interconnections into a coherent summary for {target_str} over the week. Describe how these contributions align with the project's technical objectives. Pinpoint recurring technical patterns or trends and shed light on the synergy between individual efforts and their collective progression. Detail both the weight of each contribution and their interconnectedness in shaping the project. Limit to 256 tokens.");
 
     chain_of_chat(
         sys_prompt_1,
@@ -165,34 +170,6 @@ pub async fn correlate_commits_issues_discussions(
     )
     .await
 }
-
-/* pub async fn correlate_commits_issues_discussions(
-    _commits_summary: Option<&str>,
-    _issues_summary: Option<&str>,
-    _discussions_summary: Option<&str>,
-    target_person: Option<&str>,
-) -> Option<String> {
-
-    let commits_str = _commits_summary.map_or("".to_string(), |x| format!("commit logs: {x}"));
-    let issues_str = _issues_summary.map_or("".to_string(), |x| format!("issue post: {x}"));
-    let discussions_str =
-        _discussions_summary.map_or("".to_string(), |x| format!("discussion posts: {x}"));
-    let target_str = target_person.map_or("key participants'".to_string(), |x| format!("{x}'s"));
-
-
-    let usr_prompt_2 = &format!("Now, synthesize the individual analyses into a cohesive summary. Describe how {target_str} contributions this week fit into the overall progression and objectives of the project. Focus on collaboration, interplay between different contributions, and the collective impact of the team. Mention any overarching themes or patterns observed during the week. Ensure the narrative reflects both individual efforts and their combined influence on the project's advancement. Limit your answer to 256 tokens.");
-
-    chain_of_chat(
-        sys_prompt_1,
-        usr_prompt_1,
-        "correlate-99",
-        512,
-        usr_prompt_2,
-        256,
-        "correlate_commits_issues_discussions",
-    )
-    .await
-} */
 
 pub async fn correlate_user_and_home_project(
     home_repo_data: &str,
