@@ -21,19 +21,19 @@ pub async fn weekly_report(
 
     let has_user_name = user_name.is_some();
 
-    let is_new_contributor = is_new_contributor(owner, repo, user_name.unwrap()).await;
+    let is_code_contributor = is_code_contributor(owner, repo, user_name.unwrap()).await;
 
-    if has_user_name && is_new_contributor {
-        return new_contributor_report(owner, repo, user_name.unwrap()).await;
-    }
+    // if has_user_name && is_code_contributor {
+    //     return new_contributor_report(owner, repo, user_name.unwrap()).await;
+    // }
 
-    if has_user_name && !is_new_contributor {
-        return current_contributor_report(owner, repo, user_name.unwrap()).await;
-    }
+    // if has_user_name && !is_code_contributor {
+    //     return current_contributor_report(owner, repo, user_name.unwrap()).await;
+    // }
 
-    if !has_user_name {
-        return current_repo_report(owner, repo).await;
-    }
+    // if !has_user_name {
+    //     return current_repo_report(owner, repo).await;
+    // }
     None // This is the default return for when user_name is None
 }
 
@@ -98,5 +98,4 @@ pub async fn current_contributor_report(
 }
 pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
     Some("".to_string())
-
 }

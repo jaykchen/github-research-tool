@@ -11,7 +11,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Issue {
@@ -724,5 +723,3 @@ pub struct Rate {
     pub remaining: usize,
     pub reset: usize,
 }
-
-

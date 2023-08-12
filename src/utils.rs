@@ -37,7 +37,6 @@ fn get_vals(hex_key: &str) -> (String, String) {
 
  */
 
-
 pub fn squeeze_fit_commits_issues(commits: &str, issues: &str, split: f32) -> (String, String) {
     let mut commits_vec = commits.split_whitespace().collect::<Vec<&str>>();
     let commits_len = commits_vec.len();

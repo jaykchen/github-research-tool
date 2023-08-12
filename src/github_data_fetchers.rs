@@ -1,12 +1,12 @@
-use crate::octocrab_compat::{Comment, Issue, Repository, User};
+use crate::octocrab_compat::{ Comment, Issue, Repository, User };
 use crate::utils::*;
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{ DateTime, Duration, NaiveDate, Utc };
 use derivative::Derivative;
 use http_req::response::Response;
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use serde_json;
 use std::env;
-use store_flows::{get, set};
+use store_flows::{ get, set };
 
 #[derive(Derivative, Serialize, Deserialize, Debug)]
 pub struct GitMemory {
@@ -33,7 +33,7 @@ pub async fn get_issues_in_range(
     owner: &str,
     repo: &str,
     user_name: Option<&str>,
-    range: u16,
+    range: u16
 ) -> Option<(usize, Vec<Issue>)> {
     #[derive(Debug, Deserialize)]
     struct Page<T> {
@@ -44,13 +44,9 @@ pub async fn get_issues_in_range(
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
 
     let now = Utc::now();
-    let n_days_ago = (now - Duration::days(range as i64))
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
+    let n_days_ago = (now - Duration::days(range as i64)).format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    let user_str = user_name
-        .map(|u| format!("involves:{}", u))
-        .unwrap_or_default();
+    let user_str = user_name.map(|u| format!("involves:{}", u)).unwrap_or_default();
 
     let query = format!("repo:{owner}/{repo} is:issue {user_str} updated:>{n_days_ago}");
     let encoded_query = urlencoding::encode(&query);
@@ -62,33 +58,37 @@ pub async fn get_issues_in_range(
     loop {
         let url_str = format!(
             "https://api.github.com/search/issues?q={}&sort=updated&order=desc&page={}",
-            encoded_query, current_page
+            encoded_query,
+            current_page
         );
 
         match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
-                Err(e) => {
-                    log::error!("error: {:?}", e);
-                    break;
-                }
-                Ok(issue_page) => {
-                    if total_pages.is_none() {
-                        if let Some(total) = issue_page.total_count {
-                            total_pages = Some((total as f64 / 30.0).ceil() as usize);
-                        }
-                    }
-
-                    for issue in issue_page.items {
-                        issue_vec.push(issue.clone());
-                    }
-
-                    current_page += 1;
-                    if current_page > total_pages.unwrap_or(usize::MAX) {
+            Some(res) =>
+                match serde_json::from_slice::<Page<Issue>>(res.as_slice()) {
+                    Err(e) => {
+                        log::error!("error: {:?}", e);
                         break;
                     }
+                    Ok(issue_page) => {
+                        if total_pages.is_none() {
+                            if let Some(total) = issue_page.total_count {
+                                total_pages = Some(((total as f64) / 30.0).ceil() as usize);
+                            }
+                        }
+
+                        for issue in issue_page.items {
+                            issue_vec.push(issue.clone());
+                        }
+
+                        current_page += 1;
+                        if current_page > total_pages.unwrap_or(usize::MAX) {
+                            break;
+                        }
+                    }
                 }
-            },
-            None => break,
+            None => {
+                break;
+            }
         }
     }
     let count = issue_vec.len();
@@ -105,48 +105,52 @@ pub async fn get_issue_texts(issue: Issue) -> Option<String> {
     };
     let issue_url = issue.url.to_string();
 
-    let labels = issue
-        .labels
+    let labels = issue.labels
         .into_iter()
         .map(|lab| lab.name)
         .collect::<Vec<String>>()
         .join(", ");
 
-    let mut all_text_from_issue = format!("User '{issue_creator_name}', opened an issue titled '{issue_title}', labeled '{labels}', with the following post: '{issue_body}'.");
+    let mut all_text_from_issue = format!(
+        "User '{issue_creator_name}', opened an issue titled '{issue_title}', labeled '{labels}', with the following post: '{issue_body}'."
+    );
 
     let mut current_page = 1;
     loop {
         let url_str = format!("{issue_url}/comments?&page={}", current_page);
 
         match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
-                Err(_e) => {
-                    log::error!(
-                        "Error parsing Vec<Comment> at page {}: {:?}",
-                        current_page,
-                        _e
-                    );
-                    break;
-                }
-                Ok(comments_obj) => {
-                    if comments_obj.is_empty() {
-                        break; // Exit the loop when there are no more comments to process
+            Some(res) =>
+                match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
+                    Err(_e) => {
+                        log::error!(
+                            "Error parsing Vec<Comment> at page {}: {:?}",
+                            current_page,
+                            _e
+                        );
+                        break;
                     }
-                    for comment in comments_obj {
-                        let comment_body = match comment.body {
-                            Some(body) => squeeze_fit_remove_quoted(&body, "```", 500, 0.6),
-                            None => "".to_string(),
-                        };
-                        let commenter = comment.user.login;
-                        let commenter_input = format!("{commenter} commented: {comment_body}");
-                        if all_text_from_issue.len() > 45_000 {
-                            break;
+                    Ok(comments_obj) => {
+                        if comments_obj.is_empty() {
+                            break; // Exit the loop when there are no more comments to process
                         }
-                        all_text_from_issue.push_str(&commenter_input);
+                        for comment in comments_obj {
+                            let comment_body = match comment.body {
+                                Some(body) => squeeze_fit_remove_quoted(&body, "```", 500, 0.6),
+                                None => "".to_string(),
+                            };
+                            let commenter = comment.user.login;
+                            let commenter_input = format!("{commenter} commented: {comment_body}");
+                            if all_text_from_issue.len() > 45_000 {
+                                break;
+                            }
+                            all_text_from_issue.push_str(&commenter_input);
+                        }
                     }
                 }
-            },
-            None => break,
+            None => {
+                break;
+            }
         }
 
         current_page += 1;
@@ -158,7 +162,7 @@ pub async fn get_commits_in_range(
     owner: &str,
     repo: &str,
     user_name: Option<&str>,
-    range: u16,
+    range: u16
 ) -> Option<(usize, Vec<GitMemory>)> {
     #[derive(Debug, Deserialize, Serialize)]
     struct User {
@@ -169,7 +173,7 @@ pub async fn get_commits_in_range(
     struct GithubCommit {
         sha: String,
         html_url: String,
-        author: Option<User>,    // made nullable
+        author: Option<User>, // made nullable
         committer: Option<User>, // made nullable
         commit: CommitDetails,
     }
@@ -193,8 +197,9 @@ pub async fn get_commits_in_range(
         None => "".to_string(),
     };
 
-    let base_commit_url =
-        format!("https://api.github.com/repos/{owner}/{repo}/commits?{author_str}",);
+    let base_commit_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/commits?{author_str}"
+    );
 
     let mut git_memory_vec = vec![];
     let now = Utc::now();
@@ -207,36 +212,37 @@ pub async fn get_commits_in_range(
                 log::error!("Error fetching commits");
                 break;
             }
-            Some(res) => match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
-                Err(e) => {
-                    log::error!("Error parsing commits: {:?}", e);
-                    break;
-                }
-                Ok(commits) => {
-                    if commits.is_empty() {
-                        break; // If the page is empty, exit the loop
+            Some(res) =>
+                match serde_json::from_slice::<Vec<GithubCommit>>(res.as_slice()) {
+                    Err(e) => {
+                        log::error!("Error parsing commits: {:?}", e);
+                        break;
                     }
+                    Ok(commits) => {
+                        if commits.is_empty() {
+                            break; // If the page is empty, exit the loop
+                        }
 
-                    for commit in commits {
-                        if let Some(commit_date) = &commit.commit.author.date {
-                            if commit_date.date_naive() > n_days_ago {
-                                if let Some(author) = &commit.author {
-                                    git_memory_vec.push(GitMemory {
-                                        memory_type: MemoryType::Commit,
-                                        name: author.login.clone(), // clone as author.login is String type
-                                        tag_line: commit.commit.message.clone(),
-                                        source_url: commit.html_url.clone(),
-                                        payload: String::from(""),
-                                        date: commit_date.date_naive(),
-                                    });
+                        for commit in commits {
+                            if let Some(commit_date) = &commit.commit.author.date {
+                                if commit_date.date_naive() > n_days_ago {
+                                    if let Some(author) = &commit.author {
+                                        git_memory_vec.push(GitMemory {
+                                            memory_type: MemoryType::Commit,
+                                            name: author.login.clone(), // clone as author.login is String type
+                                            tag_line: commit.commit.message.clone(),
+                                            source_url: commit.html_url.clone(),
+                                            payload: String::from(""),
+                                            date: commit_date.date_naive(),
+                                        });
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    current_page += 1;
+                        current_page += 1;
+                    }
                 }
-            },
         }
     }
 
@@ -309,70 +315,75 @@ pub async fn get_user_data_by_login(login: &str) -> Option<String> {
             log::info!("Failed to send the request to get UserRoot: {}", base_url);
             return None;
         }
-        Some(res) => match serde_json::from_slice::<UserRoot>(res.as_slice()) {
-            Err(e) => {
-                log::error!("Failed to parse the response for UserRoot: {}", e);
-                return None;
-            }
-            Ok(results) => {
-                if let Some(repository_owner) = &results.data {
-                    if let Some(user) = &repository_owner.repositoryOwner {
-                        let login_str = match &user.login {
-                            Some(login) => format!("Login: {},", login),
-                            None => return None,
-                        };
+        Some(res) =>
+            match serde_json::from_slice::<UserRoot>(res.as_slice()) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for UserRoot: {}", e);
+                    return None;
+                }
+                Ok(results) => {
+                    if let Some(repository_owner) = &results.data {
+                        if let Some(user) = &repository_owner.repositoryOwner {
+                            let login_str = match &user.login {
+                                Some(login) => format!("Login: {},", login),
+                                None => {
+                                    return None;
+                                }
+                            };
 
-                        let name_str = match &user.name {
-                            Some(name) => format!("Name: {},", name),
-                            None => String::new(),
-                        };
+                            let name_str = match &user.name {
+                                Some(name) => format!("Name: {},", name),
+                                None => String::new(),
+                            };
 
-                        let url_str = match &user.url {
-                            Some(url) => format!("Url: {},", url),
-                            None => String::new(),
-                        };
+                            let url_str = match &user.url {
+                                Some(url) => format!("Url: {},", url),
+                                None => String::new(),
+                            };
 
-                        let twitter_str = match &user.twitterUsername {
-                            Some(twitter) => format!("Twitter: {},", twitter),
-                            None => String::new(),
-                        };
+                            let twitter_str = match &user.twitterUsername {
+                                Some(twitter) => format!("Twitter: {},", twitter),
+                                None => String::new(),
+                            };
 
-                        let bio_str = match &user.bio {
-                            Some(bio) if bio.is_empty() => String::new(),
-                            Some(bio) => format!("Bio: {},", bio),
-                            None => String::new(),
-                        };
+                            let bio_str = match &user.bio {
+                                Some(bio) if bio.is_empty() => String::new(),
+                                Some(bio) => format!("Bio: {},", bio),
+                                None => String::new(),
+                            };
 
-                        let company_str = match &user.company {
-                            Some(company) => format!("Company: {},", company),
-                            None => String::new(),
-                        };
+                            let company_str = match &user.company {
+                                Some(company) => format!("Company: {},", company),
+                                None => String::new(),
+                            };
 
-                        let location_str = match &user.location {
-                            Some(location) => format!("Location: {},", location),
-                            None => String::new(),
-                        };
+                            let location_str = match &user.location {
+                                Some(location) => format!("Location: {},", location),
+                                None => String::new(),
+                            };
 
-                        let date_str = match &user.createdAt {
-                            Some(date) => {
-                                format!("Created At: {},", date.date_naive().to_string())
-                            }
-                            None => String::new(),
-                        };
+                            let date_str = match &user.createdAt {
+                                Some(date) => {
+                                    format!("Created At: {},", date.date_naive().to_string())
+                                }
+                                None => String::new(),
+                            };
 
-                        let email_str = match &user.email {
-                            Some(email) => format!("Email: {}", email),
-                            None => String::new(),
-                        };
+                            let email_str = match &user.email {
+                                Some(email) => format!("Email: {}", email),
+                                None => String::new(),
+                            };
 
-                        out.push_str(&format!(
-                            "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
-                        ));
+                            out.push_str(
+                                &format!(
+                                    "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
+                                )
+                            );
+                        }
                     }
                 }
             }
-        },
-    };
+    }
 
     Some(out)
 }
@@ -384,16 +395,18 @@ pub async fn get_community_profile_data(owner: &str, repo: &str) -> Option<Strin
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let community_profile_url =
-        format!("https://api.github.com/repos/{owner}/{repo}/community/profile");
+    let community_profile_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/community/profile"
+    );
 
     match github_http_fetch(&github_token, &community_profile_url).await {
-        Some(res) => match serde_json::from_slice::<CommunityProfile>(&res) {
-            Ok(profile) => {
-                return Some(format!("Description: {}", profile.description));
+        Some(res) =>
+            match serde_json::from_slice::<CommunityProfile>(&res) {
+                Ok(profile) => {
+                    return Some(format!("Description: {}", profile.description));
+                }
+                Err(e) => log::error!("Error parsing Community Profile: {:?}", e),
             }
-            Err(e) => log::error!("Error parsing Community Profile: {:?}", e),
-        },
         None => log::error!("Community profile not found for {}/{}.", owner, repo),
     }
     None
@@ -409,36 +422,46 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
     let readme_url = format!("https://api.github.com/repos/{owner}/{repo}/readme");
 
     match github_http_fetch(&github_token, &readme_url).await {
-        Some(res) => match serde_json::from_slice::<GithubReadme>(&res) {
-            Ok(readme) => {
-                if let Some(c) = readme.content {
-                    let cleaned_content = c.replace("\n", "");
-                    match base64::decode(&cleaned_content) {
-                        Ok(decoded_content) => match String::from_utf8(decoded_content) {
-                            Ok(out) => {
-                                let truncated = squeeze_fit_remove_quoted(&out, "```", 2000, 0.6);
-                                return Some(format!("Readme: {}", truncated));
-                            }
+        Some(res) =>
+            match serde_json::from_slice::<GithubReadme>(&res) {
+                Ok(readme) => {
+                    if let Some(c) = readme.content {
+                        let cleaned_content = c.replace("\n", "");
+                        match base64::decode(&cleaned_content) {
+                            Ok(decoded_content) =>
+                                match String::from_utf8(decoded_content) {
+                                    Ok(out) => {
+                                        let truncated = squeeze_fit_remove_quoted(
+                                            &out,
+                                            "```",
+                                            2000,
+                                            0.6
+                                        );
+                                        return Some(format!("Readme: {}", truncated));
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "Failed to convert cleaned readme to String: {:?}",
+                                            e
+                                        );
+                                        return None;
+                                    }
+                                }
                             Err(e) => {
-                                log::error!("Failed to convert cleaned readme to String: {:?}", e);
-                                return None;
+                                log::error!("Error decoding base64 content: {:?}", e);
+                                None
                             }
-                        },
-                        Err(e) => {
-                            log::error!("Error decoding base64 content: {:?}", e);
-                            None
                         }
+                    } else {
+                        log::error!("Content field in readme is null.");
+                        None
                     }
-                } else {
-                    log::error!("Content field in readme is null.");
+                }
+                Err(e) => {
+                    log::error!("Error parsing Readme: {:?}", e);
                     None
                 }
             }
-            Err(e) => {
-                log::error!("Error parsing Readme: {:?}", e);
-                None
-            }
-        },
         None => {
             log::error!("Github readme not found.");
             None
@@ -446,7 +469,7 @@ pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
     }
 }
 
-pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> bool {
+pub async fn is_code_contributor(owner: &str, repo: &str, user_name: &str) -> bool {
     use std::hash::Hasher;
     use twox_hash::XxHash;
     let repo_string = format!("{owner}/{repo}");
@@ -454,13 +477,26 @@ pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> boo
     hasher.write(repo_string.as_bytes());
     let hash = hasher.finish();
     let key = &format!("{:x}", hash);
-    match get(key)
-        .and_then(|val| serde_json::from_value::<std::collections::HashSet<String>>(val).ok())
+    match
+        get(key).and_then(|val|
+            serde_json::from_value::<std::collections::HashSet<String>>(val).ok()
+        )
     {
-        Some(set) => !set.contains(user_name),
-        None => true,
+        Some(set) => set.contains(user_name),
+        None =>
+            match get_contributors(owner, repo).await {
+                Some(contributors) => {
+                    set(key, serde_json::to_value(contributors.clone()).unwrap_or_default(), None);
+                    return contributors.contains(&user_name.to_owned());
+                }
+                None => {
+                    log::error!("Github contributors not found.");
+                    return false;
+                }
+            }
     }
 }
+
 pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
     use std::hash::Hasher;
     use twox_hash::XxHash;
@@ -474,15 +510,13 @@ pub async fn populate_contributors(owner: &str, repo: &str) -> (bool, u16) {
         None => (false, 0_u16),
 
         Some(contributors) => {
-            set(
-                key,
-                serde_json::to_value(contributors).unwrap_or_default(),
-                None,
-            );
+            set(key, serde_json::to_value(contributors).unwrap_or_default(), None);
 
-            match get(key).and_then(|val| {
-                serde_json::from_value::<std::collections::HashSet<String>>(val).ok()
-            }) {
+            match
+                get(key).and_then(|val| {
+                    serde_json::from_value::<std::collections::HashSet<String>>(val).ok()
+                })
+            {
                 Some(set) => (true, set.len() as u16),
                 None => {
                     log::error!("Error verifying saved contributors data in store");
@@ -499,22 +533,18 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contributors",
-        owner, repo
-    );
+    let url = format!("https://api.github.com/repos/{}/{}/contributors", owner, repo);
     let mut contributors = Vec::new();
 
     let mut current_url = url.to_owned();
     loop {
-        let response_result: Result<(Response, Vec<u8>), Box<dyn std::error::Error>> =
-            github_fetch_with_header(&github_token, &current_url);
+        let response_result: Result<
+            (Response, Vec<u8>),
+            Box<dyn std::error::Error>
+        > = github_fetch_with_header(&github_token, &current_url);
         match response_result {
             Err(e) => {
-                log::error!(
-                    "Error getting response for request to get contributors: {:?}",
-                    e
-                );
+                log::error!("Error getting response for request to get contributors: {:?}", e);
                 return None;
             }
             Ok((res, body)) => {
@@ -527,14 +557,15 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
                     return None;
                 }
 
-                let new_contributors: Vec<GithubUser> =
-                    match serde_json::from_slice(body.as_slice()) {
-                        Ok(contributors) => contributors,
-                        Err(err) => {
-                            log::error!("Error parsing contributors: {:?}", err);
-                            return None;
-                        }
-                    };
+                let new_contributors: Vec<GithubUser> = match
+                    serde_json::from_slice(body.as_slice())
+                {
+                    Ok(contributors) => contributors,
+                    Err(err) => {
+                        log::error!("Error parsing contributors: {:?}", err);
+                        return None;
+                    }
+                };
 
                 contributors.extend(new_contributors.into_iter().map(|user| user.login));
 
@@ -548,9 +579,13 @@ pub async fn get_contributors(owner: &str, repo: &str) -> Option<Vec<String>> {
                             .split(',')
                             .filter_map(|link| {
                                 if link.contains("rel=\"next\"") {
-                                    link.split(';').next().map(|url| {
-                                        url.trim_matches(&[' ', '<', '>'] as &[char]).to_string()
-                                    })
+                                    link.split(';')
+                                        .next()
+                                        .map(|url| {
+                                            url.trim_matches(
+                                                &[' ', '<', '>'] as &[char]
+                                            ).to_string()
+                                        })
                                 } else {
                                     None
                                 }
@@ -594,33 +629,37 @@ pub async fn get_user_repos_in_language(user: &str, language: &str) -> Option<Ve
     loop {
         let url_str = format!(
             "https://api.github.com/search/repositories?q={}&page={}",
-            encoded_query, current_page
+            encoded_query,
+            current_page
         );
 
         match github_http_fetch(&github_token, &url_str).await {
-            Some(res) => match serde_json::from_slice::<Page<Repository>>(res.as_slice()) {
-                Err(_e) => {
-                    log::error!("Error parsing Page<Repository>: {:?}", _e);
-                    break;
-                }
-                Ok(repo_page) => {
-                    if total_pages.is_none() {
-                        if let Some(count) = repo_page.total_count {
-                            total_pages = Some((count as f64 / 30.0).ceil() as usize);
-                        }
-                    }
-
-                    for repo in repo_page.items {
-                        out.push(repo);
-                    }
-
-                    current_page += 1;
-                    if current_page > total_pages.unwrap_or(usize::MAX) {
+            Some(res) =>
+                match serde_json::from_slice::<Page<Repository>>(res.as_slice()) {
+                    Err(_e) => {
+                        log::error!("Error parsing Page<Repository>: {:?}", _e);
                         break;
                     }
+                    Ok(repo_page) => {
+                        if total_pages.is_none() {
+                            if let Some(count) = repo_page.total_count {
+                                total_pages = Some(((count as f64) / 30.0).ceil() as usize);
+                            }
+                        }
+
+                        for repo in repo_page.items {
+                            out.push(repo);
+                        }
+
+                        current_page += 1;
+                        if current_page > total_pages.unwrap_or(usize::MAX) {
+                            break;
+                        }
+                    }
                 }
-            },
-            None => break,
+            None => {
+                break;
+            }
         }
     }
 
@@ -700,46 +739,52 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
         }}
     }}
     "#,
-        user_name, language
+        user_name,
+        language
     );
 
     let base_url = "https://api.github.com/graphql";
     let mut out = format!("Repos in {language}:\n");
     match github_http_post(&github_token, base_url, &query).await {
         None => log::error!("Failed to send the request to {}", base_url.to_string()),
-        Some(response) => match serde_json::from_slice::<Root>(response.as_slice()) {
-            Err(e) => log::error!("Failed to parse the response: {}", e),
-            Ok(repos) => {
-                let mut repos_sorted: Vec<&Node> = repos.data.search.nodes.iter().collect();
-                repos_sorted.sort_by(|a, b| b.stargazers.totalCount.cmp(&a.stargazers.totalCount));
-
-                for repo in repos_sorted {
-                    let name_str = format!("Repo: {}", repo.name);
-
-                    let description_str = match &repo.description {
-                        Some(description) => format!("Description: {},", description),
-                        None => String::new(),
-                    };
-
-                    let stars_str = match repo.stargazers.totalCount {
-                        0 => String::new(),
-                        count => format!("Stars: {count}"),
-                    };
-
-                    let commits_str = format!(
-                        "Commits: {}",
-                        repo.defaultBranchRef.target.history.totalCount
+        Some(response) =>
+            match serde_json::from_slice::<Root>(response.as_slice()) {
+                Err(e) => log::error!("Failed to parse the response: {}", e),
+                Ok(repos) => {
+                    let mut repos_sorted: Vec<&Node> = repos.data.search.nodes.iter().collect();
+                    repos_sorted.sort_by(|a, b|
+                        b.stargazers.totalCount.cmp(&a.stargazers.totalCount)
                     );
 
-                    let temp = format!("{name_str} {description_str} {stars_str} {commits_str}\n");
+                    for repo in repos_sorted {
+                        let name_str = format!("Repo: {}", repo.name);
 
-                    out.push_str(&temp);
+                        let description_str = match &repo.description {
+                            Some(description) => format!("Description: {},", description),
+                            None => String::new(),
+                        };
+
+                        let stars_str = match repo.stargazers.totalCount {
+                            0 => String::new(),
+                            count => format!("Stars: {count}"),
+                        };
+
+                        let commits_str = format!(
+                            "Commits: {}",
+                            repo.defaultBranchRef.target.history.totalCount
+                        );
+
+                        let temp = format!(
+                            "{name_str} {description_str} {stars_str} {commits_str}\n"
+                        );
+
+                        out.push_str(&temp);
+                    }
+
+                    log::info!("Found {} repositories", repos.data.search.nodes.len());
                 }
-
-                log::info!("Found {} repositories", repos.data.search.nodes.len());
             }
-        },
-    };
+    }
     Some(out)
 }
 
@@ -843,9 +888,7 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
             }}
             "#,
             search_query = search_query,
-            after = cursor
-                .as_ref()
-                .map_or(String::new(), |c| format!(r#", after: "{}""#, c)),
+            after = cursor.as_ref().map_or(String::new(), |c| format!(r#", after: "{}""#, c))
         );
 
         match github_http_post(&github_token, base_url, &query).await {
@@ -853,131 +896,141 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                 log::error!("Failed to send the request: {}", base_url);
                 break;
             }
-            Some(response) => match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
-                Err(e) => {
-                    log::error!("Failed to parse the response: {}", e);
-                    break;
-                }
-                Ok(results) => {
-                    if let Some(search) = &results.data.as_ref().and_then(|d| d.search.as_ref()) {
-                        if let Some(edges) = &search.edges {
-                            for edge in edges.iter().filter_map(|e| e.as_ref()) {
-                                if let Some(issue) = &edge.node {
-                                    let date = match issue.createdAt {
-                                        Some(date) => date.date_naive().to_string(),
-                                        None => continue,
-                                    };
-                                    let title_str = match &issue.title {
-                                        Some(title) => format!("Title: {},", title),
-                                        None => String::new(),
-                                    };
-                                    let url_str = match &issue.url {
-                                        Some(u) => format!("Url: {}", u),
-                                        None => String::new(),
-                                    };
+            Some(response) =>
+                match serde_json::from_slice::<IssueRoot>(response.as_slice()) {
+                    Err(e) => {
+                        log::error!("Failed to parse the response: {}", e);
+                        break;
+                    }
+                    Ok(results) => {
+                        if
+                            let Some(search) = &results.data
+                                .as_ref()
+                                .and_then(|d| d.search.as_ref())
+                        {
+                            if let Some(edges) = &search.edges {
+                                for edge in edges.iter().filter_map(|e| e.as_ref()) {
+                                    if let Some(issue) = &edge.node {
+                                        let date = match issue.createdAt {
+                                            Some(date) => date.date_naive().to_string(),
+                                            None => {
+                                                continue;
+                                            }
+                                        };
+                                        let title_str = match &issue.title {
+                                            Some(title) => format!("Title: {},", title),
+                                            None => String::new(),
+                                        };
+                                        let url_str = match &issue.url {
+                                            Some(u) => format!("Url: {}", u),
+                                            None => String::new(),
+                                        };
 
-                                    let author_str =
-                                        match issue.clone().author.and_then(|a| a.login) {
+                                        let author_str = match
+                                            issue.clone().author.and_then(|a| a.login)
+                                        {
                                             Some(auth) => format!("Author: {},", auth),
                                             None => String::new(),
                                         };
 
-                                    let assignees_str = {
-                                        let assignee_names = issue
-                                            .assignees
-                                            .as_ref()
-                                            .and_then(|e| e.edges.as_ref())
-                                            .map_or(Vec::new(), |assignee_edges| {
-                                                assignee_edges
-                                                    .iter()
-                                                    .filter_map(|edge| {
-                                                        edge.as_ref().and_then(|actual_edge| {
-                                                            actual_edge.node.as_ref().and_then(
-                                                                |user| {
-                                                                    user.login.as_ref().map(
-                                                                        |login_str| {
-                                                                            login_str.as_str()
-                                                                        },
-                                                                    )
-                                                                },
-                                                            )
+                                        let assignees_str = {
+                                            let assignee_names = issue.assignees
+                                                .as_ref()
+                                                .and_then(|e| e.edges.as_ref())
+                                                .map_or(Vec::new(), |assignee_edges| {
+                                                    assignee_edges
+                                                        .iter()
+                                                        .filter_map(|edge| {
+                                                            edge.as_ref().and_then(|actual_edge| {
+                                                                actual_edge.node
+                                                                    .as_ref()
+                                                                    .and_then(|user| {
+                                                                        user.login
+                                                                            .as_ref()
+                                                                            .map(|login_str| {
+                                                                                login_str.as_str()
+                                                                            })
+                                                                    })
+                                                            })
                                                         })
-                                                    })
-                                                    .collect::<Vec<&str>>()
-                                            });
+                                                        .collect::<Vec<&str>>()
+                                                });
 
-                                        if !assignee_names.is_empty() {
-                                            format!("Assignees: {},", assignee_names.join(", "))
-                                        } else {
-                                            String::new()
-                                        }
-                                    };
+                                            if !assignee_names.is_empty() {
+                                                format!("Assignees: {},", assignee_names.join(", "))
+                                            } else {
+                                                String::new()
+                                            }
+                                        };
 
-                                    let state_str = match &issue.state {
-                                        Some(s) => format!("State: {},", s),
-                                        None => String::new(),
-                                    };
+                                        let state_str = match &issue.state {
+                                            Some(s) => format!("State: {},", s),
+                                            None => String::new(),
+                                        };
 
-                                    let body_str = match &issue.body {
-                                        Some(body_text) if body_text.len() > 180 => {
-                                            let truncated_body = body_text
-                                                .chars()
-                                                .take(100)
-                                                .chain(
-                                                    body_text
-                                                        .chars()
-                                                        .skip(body_text.chars().count() - 80),
-                                                )
-                                                .collect::<String>();
+                                        let body_str = match &issue.body {
+                                            Some(body_text) if body_text.len() > 180 => {
+                                                let truncated_body = body_text
+                                                    .chars()
+                                                    .take(100)
+                                                    .chain(
+                                                        body_text
+                                                            .chars()
+                                                            .skip(body_text.chars().count() - 80)
+                                                    )
+                                                    .collect::<String>();
 
-                                            format!("Body: {}", truncated_body)
-                                        }
-                                        Some(body_text) => format!("Body: {},", body_text),
-                                        None => String::new(),
-                                    };
+                                                format!("Body: {}", truncated_body)
+                                            }
+                                            Some(body_text) => format!("Body: {},", body_text),
+                                            None => String::new(),
+                                        };
 
-                                    let assoc_str = match &issue.authorAssociation {
-                                        Some(association) => {
-                                            format!("Author Association: {}", association)
-                                        }
-                                        None => String::new(),
-                                    };
+                                        let assoc_str = match &issue.authorAssociation {
+                                            Some(association) => {
+                                                format!("Author Association: {}", association)
+                                            }
+                                            None => String::new(),
+                                        };
 
-                                    let temp = format!(
-                                                    "{title_str} {url_str} Created At: {date} {author_str} {assignees_str}  {state_str} {body_str} {assoc_str}");
+                                        let temp = format!(
+                                            "{title_str} {url_str} Created At: {date} {author_str} {assignees_str}  {state_str} {body_str} {assoc_str}"
+                                        );
 
-                                    out.push_str(&temp);
-                                    out.push_str("\n");
-                                } else {
-                                    continue;
+                                        out.push_str(&temp);
+                                        out.push_str("\n");
+                                    } else {
+                                        continue;
+                                    }
                                 }
                             }
-                        }
 
-                        if let Some(page_info) = &search.pageInfo {
-                            if let Some(has_next_page) = page_info.hasNextPage {
-                                if has_next_page {
-                                    match &page_info.endCursor {
-                                        Some(end_cursor) => {
-                                            cursor = Some(end_cursor.clone());
-                                            log::info!(
-                                                "Fetched a page, moving to next page with cursor: {}",
-                                                end_cursor
-                                            );
-                                            continue;
-                                        }
-                                        None => {
-                                            log::error!("Warning: hasNextPage is true, but endCursor is None. This might result in missing data.");
-                                            break;
+                            if let Some(page_info) = &search.pageInfo {
+                                if let Some(has_next_page) = page_info.hasNextPage {
+                                    if has_next_page {
+                                        match &page_info.endCursor {
+                                            Some(end_cursor) => {
+                                                cursor = Some(end_cursor.clone());
+                                                log::info!(
+                                                    "Fetched a page, moving to next page with cursor: {}",
+                                                    end_cursor
+                                                );
+                                                continue;
+                                            }
+                                            None => {
+                                                log::error!(
+                                                    "Warning: hasNextPage is true, but endCursor is None. This might result in missing data."
+                                                );
+                                                break;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        break;
                     }
-                    break;
                 }
-            },
         }
     }
 
@@ -1060,92 +1113,99 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
                 }}
             "#,
             search_query = search_query,
-            after = cursor
-                .as_ref()
-                .map_or(String::new(), |c| format!(r#", after: "{}""#, c))
+            after = cursor.as_ref().map_or(String::new(), |c| format!(r#", after: "{}""#, c))
         );
 
         match github_http_post(&github_token, base_url, &query).await {
             None => {
-                log::error!(
-                    "Failed to send the request to get RepositoryRoot: {}",
-                    base_url
-                );
+                log::error!("Failed to send the request to get RepositoryRoot: {}", base_url);
                 return None;
             }
-            Some(response) => match serde_json::from_slice::<Payload>(response.as_slice()) {
-                Err(e) => {
-                    log::error!("Failed to parse the response for RepositoryRoot: {}", e);
-                    return None;
-                }
-                Ok(payload) => {
-                    if let Some(data) = &payload.data {
-                        if let Some(search) = &data.search {
-                            if let Some(edges) = &search.edges {
-                                for edge_option in edges {
-                                    if let Some(edge) = edge_option {
-                                        if let Some(repo) = &edge.node {
-                                            let date_str = match &repo.createdAt {
-                                                Some(date) => date.date_naive().to_string(),
-                                                None => continue,
-                                            };
+            Some(response) =>
+                match serde_json::from_slice::<Payload>(response.as_slice()) {
+                    Err(e) => {
+                        log::error!("Failed to parse the response for RepositoryRoot: {}", e);
+                        return None;
+                    }
+                    Ok(payload) => {
+                        if let Some(data) = &payload.data {
+                            if let Some(search) = &data.search {
+                                if let Some(edges) = &search.edges {
+                                    for edge_option in edges {
+                                        if let Some(edge) = edge_option {
+                                            if let Some(repo) = &edge.node {
+                                                let date_str = match &repo.createdAt {
+                                                    Some(date) => date.date_naive().to_string(),
+                                                    None => {
+                                                        continue;
+                                                    }
+                                                };
 
-                                            let name_str = match &repo.name {
-                                                Some(name) => format!("Name: {name},"),
-                                                None => String::new(),
-                                            };
+                                                let name_str = match &repo.name {
+                                                    Some(name) => format!("Name: {name},"),
+                                                    None => String::new(),
+                                                };
 
-                                            let desc_str = match &repo.description {
-                                                Some(desc) if desc.len() > 300 => {
-                                                    let truncated_desc = desc
-                                                        .chars()
-                                                        .take(180)
-                                                        .chain(
-                                                            desc.chars()
-                                                                .skip(desc.chars().count() - 120),
-                                                        )
-                                                        .collect::<String>();
+                                                let desc_str = match &repo.description {
+                                                    Some(desc) if desc.len() > 300 => {
+                                                        let truncated_desc = desc
+                                                            .chars()
+                                                            .take(180)
+                                                            .chain(
+                                                                desc
+                                                                    .chars()
+                                                                    .skip(
+                                                                        desc.chars().count() - 120
+                                                                    )
+                                                            )
+                                                            .collect::<String>();
 
-                                                    format!("Description: {truncated_desc}")
-                                                }
-                                                Some(desc) => format!("Description: {desc},"),
-                                                None => String::new(),
-                                            };
+                                                        format!("Description: {truncated_desc}")
+                                                    }
+                                                    Some(desc) => format!("Description: {desc},"),
+                                                    None => String::new(),
+                                                };
 
-                                            let url_str = match &repo.url {
-                                                Some(url) => format!("Url: {url}"),
-                                                None => String::new(),
-                                            };
+                                                let url_str = match &repo.url {
+                                                    Some(url) => format!("Url: {url}"),
+                                                    None => String::new(),
+                                                };
 
-                                            let stars_str = match &repo.stargazers {
-                                                Some(sg) => format!(
-                                                    "Stars: {},",
-                                                    sg.totalCount.unwrap_or(0)
-                                                ),
-                                                None => String::new(),
-                                            };
+                                                let stars_str = match &repo.stargazers {
+                                                    Some(sg) =>
+                                                        format!(
+                                                            "Stars: {},",
+                                                            sg.totalCount.unwrap_or(0)
+                                                        ),
+                                                    None => String::new(),
+                                                };
 
-                                            let forks_str = match &repo.forkCount {
-                                                Some(forkCount) => format!("Forks: {forkCount}"),
-                                                None => String::new(),
-                                            };
+                                                let forks_str = match &repo.forkCount {
+                                                    Some(forkCount) =>
+                                                        format!("Forks: {forkCount}"),
+                                                    None => String::new(),
+                                                };
 
-                                            out.push_str(&format!("{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"));
+                                                out.push_str(
+                                                    &format!(
+                                                        "{name_str} {desc_str} {url_str} Created At: {date_str} {stars_str} {forks_str}\n"
+                                                    )
+                                                );
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            if let Some(page_info) = &search.pageInfo {
-                                if page_info.hasNextPage.unwrap_or(false) {
-                                    cursor = page_info.endCursor.clone();
-                                } else {
-                                    break;
+                                if let Some(page_info) = &search.pageInfo {
+                                    if page_info.hasNextPage.unwrap_or(false) {
+                                        cursor = page_info.endCursor.clone();
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            },
         };
     }
 
@@ -1245,83 +1305,84 @@ pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMem
     let mut git_mem_vec = Vec::with_capacity(100);
     match github_http_post(&github_token, base_url, &query).await {
         None => {
-            log::error!(
-                "Failed to send the request to get DiscussionRoot: {}",
-                base_url
-            );
+            log::error!("Failed to send the request to get DiscussionRoot: {}", base_url);
             return None;
         }
-        Some(response) => match serde_json::from_slice::<DiscussionRoot>(&response) {
-            Err(e) => {
-                log::error!("Failed to parse the response for DiscussionRoot: {}", e);
-                return None;
-            }
-            Ok(results) => {
-                let empty_str = "".to_string();
+        Some(response) =>
+            match serde_json::from_slice::<DiscussionRoot>(&response) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for DiscussionRoot: {}", e);
+                    return None;
+                }
+                Ok(results) => {
+                    let empty_str = "".to_string();
 
-                if let Some(search) = results.data?.search {
-                    for edge_option in search.edges?.iter().filter_map(|e| e.as_ref()) {
-                        if let Some(discussion) = &edge_option.node {
-                            let date = discussion.createdAt.date_naive();
-                            let title = discussion.title.as_ref().unwrap_or(&empty_str).to_string();
-                            let url = discussion.url.as_ref().unwrap_or(&empty_str).to_string();
-                            let author_login = discussion
-                                .author
-                                .as_ref()
-                                .and_then(|a| a.login.as_ref())
-                                .unwrap_or(&empty_str)
-                                .to_string();
+                    if let Some(search) = results.data?.search {
+                        for edge_option in search.edges?.iter().filter_map(|e| e.as_ref()) {
+                            if let Some(discussion) = &edge_option.node {
+                                let date = discussion.createdAt.date_naive();
+                                let title = discussion.title
+                                    .as_ref()
+                                    .unwrap_or(&empty_str)
+                                    .to_string();
+                                let url = discussion.url.as_ref().unwrap_or(&empty_str).to_string();
+                                let author_login = discussion.author
+                                    .as_ref()
+                                    .and_then(|a| a.login.as_ref())
+                                    .unwrap_or(&empty_str)
+                                    .to_string();
 
-                            let upvotes_str = match discussion.upvoteCount {
-                                Some(c) if c > 0 => format!("Upvotes: {}", c),
-                                _ => "".to_string(),
-                            };
+                                let upvotes_str = match discussion.upvoteCount {
+                                    Some(c) if c > 0 => format!("Upvotes: {}", c),
+                                    _ => "".to_string(),
+                                };
 
-                            let mut payload = String::new();
-                            payload.push_str(&format!(
-                                "Title: '{}' Url: '{}' Body: '{}' Created At: {} {} Author: {}\n",
-                                title,
-                                url,
-                                discussion.body.as_ref().unwrap_or(&empty_str),
-                                date,
-                                upvotes_str,
-                                author_login
-                            ));
+                                let mut payload = String::new();
+                                payload.push_str(
+                                    &format!(
+                                        "Title: '{}' Url: '{}' Body: '{}' Created At: {} {} Author: {}\n",
+                                        title,
+                                        url,
+                                        discussion.body.as_ref().unwrap_or(&empty_str),
+                                        date,
+                                        upvotes_str,
+                                        author_login
+                                    )
+                                );
 
-                            if let Some(comments) = &discussion.comments {
-                                if let Some(ref edges) = comments.edges {
-                                    for comment_edge_option in
-                                        edges.iter().filter_map(|e| e.as_ref())
-                                    {
-                                        if let Some(comment) = &comment_edge_option.node {
-                                            let one_comment_text = format!(
-                                                "{} comments: '{}'\n",
-                                                comment
-                                                    .author
-                                                    .as_ref()
-                                                    .and_then(|a| a.login.as_ref())
-                                                    .unwrap_or(&empty_str),
-                                                comment.body.as_ref().unwrap_or(&empty_str)
-                                            );
-                                            payload.push_str(&one_comment_text);
+                                if let Some(comments) = &discussion.comments {
+                                    if let Some(ref edges) = comments.edges {
+                                        for comment_edge_option in edges
+                                            .iter()
+                                            .filter_map(|e| e.as_ref()) {
+                                            if let Some(comment) = &comment_edge_option.node {
+                                                let one_comment_text = format!(
+                                                    "{} comments: '{}'\n",
+                                                    comment.author
+                                                        .as_ref()
+                                                        .and_then(|a| a.login.as_ref())
+                                                        .unwrap_or(&empty_str),
+                                                    comment.body.as_ref().unwrap_or(&empty_str)
+                                                );
+                                                payload.push_str(&one_comment_text);
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            git_mem_vec.push(GitMemory {
-                                memory_type: MemoryType::Discussion,
-                                name: author_login,
-                                tag_line: title,
-                                source_url: url,
-                                payload: payload,
-                                date: date,
-                            })
+                                git_mem_vec.push(GitMemory {
+                                    memory_type: MemoryType::Discussion,
+                                    name: author_login,
+                                    tag_line: title,
+                                    source_url: url,
+                                    payload: payload,
+                                    date: date,
+                                });
+                            }
                         }
                     }
                 }
             }
-        },
     }
 
     if git_mem_vec.is_empty() {
@@ -1392,7 +1453,7 @@ pub async fn search_users(search_query: &str) -> Option<String> {
             }}
         }}
         "#,
-        search_query = search_query,
+        search_query = search_query
     );
 
     match github_http_post(&github_token, base_url, &query).await {
@@ -1400,77 +1461,82 @@ pub async fn search_users(search_query: &str) -> Option<String> {
             log::error!("Failed to send the request to get UserRoot: {}", base_url);
             return None;
         }
-        Some(res) => match serde_json::from_slice::<UserRoot>(res.as_slice()) {
-            Err(e) => {
-                log::error!("Failed to parse the response for UserRoot: {}", e);
-                return None;
-            }
-            Ok(results) => {
-                if let Some(search) = &results.data {
-                    if let Some(edges) = &search.search {
-                        for edge_option in edges.edges.as_ref().unwrap_or(&vec![]) {
-                            if let Some(edge) = edge_option {
-                                if let Some(user) = &edge.node {
-                                    let login_str = match &user.login {
-                                        Some(login) => format!("Login: {},", login),
-                                        None => continue,
-                                    };
-                                    let name_str = match &user.name {
-                                        Some(name) => format!("Name: {},", name),
-                                        None => String::new(),
-                                    };
+        Some(res) =>
+            match serde_json::from_slice::<UserRoot>(res.as_slice()) {
+                Err(e) => {
+                    log::error!("Failed to parse the response for UserRoot: {}", e);
+                    return None;
+                }
+                Ok(results) => {
+                    if let Some(search) = &results.data {
+                        if let Some(edges) = &search.search {
+                            for edge_option in edges.edges.as_ref().unwrap_or(&vec![]) {
+                                if let Some(edge) = edge_option {
+                                    if let Some(user) = &edge.node {
+                                        let login_str = match &user.login {
+                                            Some(login) => format!("Login: {},", login),
+                                            None => {
+                                                continue;
+                                            }
+                                        };
+                                        let name_str = match &user.name {
+                                            Some(name) => format!("Name: {},", name),
+                                            None => String::new(),
+                                        };
 
-                                    let url_str = match &user.url {
-                                        Some(url) => format!("Url: {},", url),
-                                        None => String::new(),
-                                    };
+                                        let url_str = match &user.url {
+                                            Some(url) => format!("Url: {},", url),
+                                            None => String::new(),
+                                        };
 
-                                    let twitter_str = match &user.twitterUsername {
-                                        Some(twitter) => format!("Twitter: {},", twitter),
-                                        None => String::new(),
-                                    };
+                                        let twitter_str = match &user.twitterUsername {
+                                            Some(twitter) => format!("Twitter: {},", twitter),
+                                            None => String::new(),
+                                        };
 
-                                    let bio_str = match &user.bio {
-                                        Some(bio) => format!("Bio: {},", bio),
-                                        None => String::new(),
-                                    };
+                                        let bio_str = match &user.bio {
+                                            Some(bio) => format!("Bio: {},", bio),
+                                            None => String::new(),
+                                        };
 
-                                    let company_str = match &user.company {
-                                        Some(company) => format!("Company: {},", company),
-                                        None => String::new(),
-                                    };
+                                        let company_str = match &user.company {
+                                            Some(company) => format!("Company: {},", company),
+                                            None => String::new(),
+                                        };
 
-                                    let location_str = match &user.location {
-                                        Some(location) => format!("Location: {},", location),
-                                        None => String::new(),
-                                    };
+                                        let location_str = match &user.location {
+                                            Some(location) => format!("Location: {},", location),
+                                            None => String::new(),
+                                        };
 
-                                    let date_str = match &user.createdAt {
-                                        Some(date) => {
-                                            format!(
-                                                "Created At: {},",
-                                                date.date_naive().to_string()
+                                        let date_str = match &user.createdAt {
+                                            Some(date) => {
+                                                format!(
+                                                    "Created At: {},",
+                                                    date.date_naive().to_string()
+                                                )
+                                            }
+                                            None => String::new(),
+                                        };
+
+                                        let email_str = match &user.email {
+                                            Some(email) => format!("Email: {}", email),
+                                            None => String::new(),
+                                        };
+
+                                        out.push_str(
+                                            &format!(
+                                                "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
                                             )
-                                        }
-                                        None => String::new(),
-                                    };
-
-                                    let email_str = match &user.email {
-                                        Some(email) => format!("Email: {}", email),
-                                        None => String::new(),
-                                    };
-
-                                    out.push_str(&format!(
-                                        "{name_str} {login_str} {url_str} {twitter_str} {bio_str} {company_str} {location_str} {date_str} {email_str}\n"
-                                    ));
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        },
-    };
+    }
 
     Some(out)
 }
