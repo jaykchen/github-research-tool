@@ -169,11 +169,11 @@ pub async fn get_commits_in_range(
     struct GithubCommit {
         sha: String,
         html_url: String,
-        author: User,
-        committer: User,
+        author: Option<User>, // made nullable
+        committer: Option<User>, // made nullable
         commit: CommitDetails,
     }
-
+    
     #[derive(Serialize, Deserialize, Debug)]
     struct CommitDetails {
         author: CommitUserDetails,
@@ -216,25 +216,28 @@ pub async fn get_commits_in_range(
                     if commits.is_empty() {
                         break; // If the page is empty, exit the loop
                     }
-
+            
                     for commit in commits {
                         if let Some(commit_date) = &commit.commit.author.date {
                             if commit_date.date_naive() > n_days_ago {
-                                git_memory_vec.push(GitMemory {
-                                    memory_type: MemoryType::Commit,
-                                    name: commit.author.login,
-                                    tag_line: commit.commit.message,
-                                    source_url: commit.html_url,
-                                    payload: String::from(""),
-                                    date: commit_date.date_naive(),
-                                });
+                                if let Some(author) = &commit.author {
+                                    git_memory_vec.push(GitMemory {
+                                        memory_type: MemoryType::Commit,
+                                        name: author.login.clone(), // clone as author.login is String type
+                                        tag_line: commit.commit.message.clone(),
+                                        source_url: commit.html_url.clone(),
+                                        payload: String::from(""),
+                                        date: commit_date.date_naive(),
+                                    });
+                                }
                             }
                         }
                     }
-
+            
                     current_page += 1;
                 }
             },
+            
         }
     }
 
