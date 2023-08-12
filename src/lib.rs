@@ -6,13 +6,15 @@ pub mod reports;
 pub mod utils;
 use chrono::{ Duration, Utc };
 use data_analyzers::*;
-use discord_flows::model::interactions::application_command::{
-    ApplicationCommand,
-    ApplicationCommandInteraction,
-};
+// use discord_flows::model::interactions::application_command::{
+//     // ApplicationCommand,
+//     ApplicationCommandInteraction,
+// };
 use discord_flows::{
+    model::application::interaction::application_command::ApplicationCommandInteraction,
     http::Http,
-    model::{ application_command::CommandDataOptionValue, channel, guild, Interaction },
+    model::{ application_command::CommandDataOptionValue },
+    // model::{ application_command::CommandDataOptionValue, channel, guild, Interaction },
     Bot,
     EventModel,
     ProvidedBot,
@@ -21,10 +23,10 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
-use reports::*;
 use serde_json;
 use slack_flows::send_message_to_channel;
 use std::env;
+use tokio::time::{ sleep };
 
 #[no_mangle]
 #[tokio::main(flavor = "current_thread")]
@@ -82,9 +84,9 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
     }
 }
 
-async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
+async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
-    let mut n_days = 7u16;
+    let n_days = 7u16;
     let owner = match
         options
             .get(0)
@@ -107,9 +109,11 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         _ => panic!("Expected string for repo"),
     };
 
-    let mut profile_data = None;
+    let mut _profile_data = None;
     match is_valid_owner_repo(owner, repo).await {
         None => {
+            let _ = sleep(tokio::time::Duration::from_secs(1)).await;
+
             match
                 client.edit_original_interaction_response(
                     &ac.token,
@@ -128,7 +132,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
             }
         }
         Some(gm) => {
-            profile_data = Some(gm.payload);
+            _profile_data = Some(gm.payload);
         }
     }
 
@@ -141,7 +145,8 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
 
     if let Some(user_name) = user_name {
         match is_code_contributor(owner, repo, user_name).await {
-            false =>
+            false => {
+                let _ = sleep(tokio::time::Duration::from_secs(1)).await;
                 match
                     client.edit_original_interaction_response(
                         &ac.token,
@@ -158,6 +163,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
                         );
                     }
                 }
+            }
 
             true => {}
         }

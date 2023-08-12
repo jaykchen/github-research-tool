@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::env;
 
 pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
-    #[derive(Deserialize, Debug)]
+    #[derive(Deserialize)]
     struct CommunityProfile {
         health_percentage: u16,
         description: Option<String>,
@@ -290,10 +290,7 @@ pub async fn analyze_issue(
     let issue_creator_name = issue.user.login;
     let issue_number = issue.number;
     let issue_title = issue.title;
-    let issue_body = match issue.body {
-        Some(body) => squeeze_fit_remove_quoted(&body, "```", 500, 0.6),
-        None => "".to_string(),
-    };
+
     let issue_date = issue.created_at.date_naive();
     let issue_url = issue.url.to_string();
     let target_str = target_person.unwrap_or("key participants");

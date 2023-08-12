@@ -127,12 +127,14 @@
 
 //     #[derive(Debug, Deserialize)]
 //     struct History {
-//         totalCount: i32,
+//         #[serde(rename = "totalCount")]
+total_count: i32,
 //     }
 
 //     #[derive(Debug, Deserialize)]
 //     struct Stargazers {
-//         totalCount: i32,
+//         #[serde(rename = "totalCount")]
+total_count: i32,
 //     }
 //     let octocrab = get_octo(&GithubLogin::Default);
 //     let query = format!(
@@ -173,14 +175,14 @@
 //         Err(_e) => log::error!("Failed to send the request to {}", _e.to_string()),
 //         Ok(response) => {
 //             let mut repos_sorted: Vec<&Node> = response.data.search.nodes.iter().collect();
-//             repos_sorted.sort_by(|a, b| b.stargazers.totalCount.cmp(&a.stargazers.totalCount));
+//             repos_sorted.sort_by(|a, b| b.stargazers.total_count.cmp(&a.stargazers.total_count));
 
 //             for repo in repos_sorted {
 //                 let temp = format!(
 //                     "Repo: {}, Stars: {}, Commits: {}",
 //                     repo.name,
-//                     repo.stargazers.totalCount,
-//                     repo.defaultBranchRef.target.history.totalCount
+//                     repo.stargazers.total_count,
+//                     repo.default_branch_ref.target.history.total_count
 //                 );
 //                 out.push_str(&temp);
 //             }

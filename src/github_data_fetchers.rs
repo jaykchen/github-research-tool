@@ -268,17 +268,20 @@ pub async fn get_user_data_by_login(login: &str) -> Option<String> {
         name: Option<String>,
         login: Option<String>,
         url: Option<String>,
-        twitterUsername: Option<String>,
+        #[serde(rename = "twitterUsername")]
+        twitter_username: Option<String>,
         bio: Option<String>,
         company: Option<String>,
         location: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
+        #[serde(rename = "createdAt")]
+        created_at: Option<DateTime<Utc>>,
         email: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
     struct RepositoryOwner {
-        repositoryOwner: Option<User>,
+        #[serde(rename = "repositoryOwner")]
+        repository_owner: Option<User>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -323,7 +326,7 @@ pub async fn get_user_data_by_login(login: &str) -> Option<String> {
                 }
                 Ok(results) => {
                     if let Some(repository_owner) = &results.data {
-                        if let Some(user) = &repository_owner.repositoryOwner {
+                        if let Some(user) = &repository_owner.repository_owner {
                             let login_str = match &user.login {
                                 Some(login) => format!("Login: {},", login),
                                 None => {
@@ -341,7 +344,7 @@ pub async fn get_user_data_by_login(login: &str) -> Option<String> {
                                 None => String::new(),
                             };
 
-                            let twitter_str = match &user.twitterUsername {
+                            let twitter_str = match &user.twitter_username {
                                 Some(twitter) => format!("Twitter: {},", twitter),
                                 None => String::new(),
                             };
@@ -362,7 +365,7 @@ pub async fn get_user_data_by_login(login: &str) -> Option<String> {
                                 None => String::new(),
                             };
 
-                            let date_str = match &user.createdAt {
+                            let date_str = match &user.created_at {
                                 Some(date) => {
                                     format!("Created At: {},", date.date_naive().to_string())
                                 }
@@ -689,8 +692,9 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
     #[derive(Debug, Deserialize)]
     pub struct Node {
         pub name: String,
-        pub defaultBranchRef: BranchRef,
-        pub stargazers: Stargazers,
+        #[serde(rename = "defaultBranchRef")]
+        default_branch_ref: BranchRef,
+        stargazers: Stargazers,
         pub description: Option<String>,
     }
     #[derive(Debug, Deserialize)]
@@ -705,12 +709,14 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
 
     #[derive(Debug, Deserialize)]
     struct History {
-        totalCount: i32,
+        #[serde(rename = "totalCount")]
+        total_count: i32,
     }
 
     #[derive(Debug, Deserialize)]
     struct Stargazers {
-        totalCount: i32,
+        #[serde(rename = "totalCount")]
+        total_count: i32,
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
@@ -753,7 +759,7 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
                 Ok(repos) => {
                     let mut repos_sorted: Vec<&Node> = repos.data.search.nodes.iter().collect();
                     repos_sorted.sort_by(|a, b|
-                        b.stargazers.totalCount.cmp(&a.stargazers.totalCount)
+                        b.stargazers.total_count.cmp(&a.stargazers.total_count)
                     );
 
                     for repo in repos_sorted {
@@ -764,14 +770,14 @@ pub async fn get_user_repos_gql(user_name: &str, language: &str) -> Option<Strin
                             None => String::new(),
                         };
 
-                        let stars_str = match repo.stargazers.totalCount {
+                        let stars_str = match repo.stargazers.total_count {
                             0 => String::new(),
                             count => format!("Stars: {count}"),
                         };
 
                         let commits_str = format!(
                             "Commits: {}",
-                            repo.defaultBranchRef.target.history.totalCount
+                            repo.default_branch_ref.target.history.total_count
                         );
 
                         let temp = format!(
@@ -813,9 +819,12 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
         body: Option<String>,
         author: Option<User>,
         assignees: Option<AssigneeEdge>,
-        authorAssociation: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
-        updatedAt: Option<DateTime<Utc>>,
+        #[serde(rename = "authorAssociation")]
+        author_association: Option<String>,
+        #[serde(rename = "createdAt")]
+        created_at: Option<DateTime<Utc>>,
+        #[serde(rename = "updatedAt")]
+        updated_at: Option<DateTime<Utc>>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -825,14 +834,17 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
 
     #[derive(Debug, Deserialize, Clone)]
     struct PageInfo {
-        endCursor: Option<String>,
-        hasNextPage: Option<bool>,
+        #[serde(rename = "endCursor")]
+        end_cursor: Option<String>,
+        #[serde(rename = "hasNextPage")]
+        has_next_page: Option<bool>,
     }
 
     #[derive(Debug, Deserialize)]
     struct SearchResult {
         edges: Option<Vec<Option<IssueNode>>>,
-        pageInfo: Option<PageInfo>,
+        #[serde(rename = "pageInfo")]
+        page_info: Option<PageInfo>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -911,7 +923,7 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                             if let Some(edges) = &search.edges {
                                 for edge in edges.iter().filter_map(|e| e.as_ref()) {
                                     if let Some(issue) = &edge.node {
-                                        let date = match issue.createdAt {
+                                        let date = match issue.created_at {
                                             Some(date) => date.date_naive().to_string(),
                                             None => {
                                                 continue;
@@ -986,7 +998,7 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                             None => String::new(),
                                         };
 
-                                        let assoc_str = match &issue.authorAssociation {
+                                        let assoc_str = match &issue.author_association {
                                             Some(association) => {
                                                 format!("Author Association: {}", association)
                                             }
@@ -1005,10 +1017,10 @@ pub async fn search_issue(search_query: &str) -> Option<String> {
                                 }
                             }
 
-                            if let Some(page_info) = &search.pageInfo {
-                                if let Some(has_next_page) = page_info.hasNextPage {
+                            if let Some(page_info) = &search.page_info {
+                                if let Some(has_next_page) = page_info.has_next_page {
                                     if has_next_page {
-                                        match &page_info.endCursor {
+                                        match &page_info.end_cursor {
                                             Some(end_cursor) => {
                                                 cursor = Some(end_cursor.clone());
                                                 log::info!(
@@ -1051,7 +1063,8 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
     #[derive(Debug, Deserialize)]
     struct Search {
         edges: Option<Vec<Option<Edge>>>,
-        pageInfo: Option<PageInfo>,
+        #[serde(rename = "pageInfo")]
+        page_info: Option<PageInfo>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1064,20 +1077,25 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
         name: Option<String>,
         description: Option<String>,
         url: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
+        #[serde(rename = "createdAt")]
+        created_at: Option<DateTime<Utc>>,
         stargazers: Option<Stargazers>,
-        forkCount: Option<u32>,
+        #[serde(rename = "forkCount")]
+        fork_count: Option<u32>,
     }
 
     #[derive(Debug, Deserialize)]
     struct Stargazers {
-        totalCount: Option<u32>,
+        #[serde(rename = "totalCount")]
+        total_count: Option<u32>,
     }
 
     #[derive(Debug, Deserialize)]
     struct PageInfo {
-        endCursor: Option<String>,
-        hasNextPage: Option<bool>,
+        #[serde(rename = "endCursor")]
+        end_cursor: Option<String>,
+        #[serde(rename = "hasNextPage")]
+        has_next_page: Option<bool>,
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
@@ -1134,7 +1152,7 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
                                     for edge_option in edges {
                                         if let Some(edge) = edge_option {
                                             if let Some(repo) = &edge.node {
-                                                let date_str = match &repo.createdAt {
+                                                let date_str = match &repo.created_at {
                                                     Some(date) => date.date_naive().to_string(),
                                                     None => {
                                                         continue;
@@ -1175,14 +1193,14 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
                                                     Some(sg) =>
                                                         format!(
                                                             "Stars: {},",
-                                                            sg.totalCount.unwrap_or(0)
+                                                            sg.total_count.unwrap_or(0)
                                                         ),
                                                     None => String::new(),
                                                 };
 
-                                                let forks_str = match &repo.forkCount {
-                                                    Some(forkCount) =>
-                                                        format!("Forks: {forkCount}"),
+                                                let forks_str = match &repo.fork_count {
+                                                    Some(fork_count) =>
+                                                        format!("Forks: {fork_count}"),
                                                     None => String::new(),
                                                 };
 
@@ -1195,9 +1213,9 @@ pub async fn search_repository(search_query: &str) -> Option<String> {
                                         }
                                     }
                                 }
-                                if let Some(page_info) = &search.pageInfo {
-                                    if page_info.hasNextPage.unwrap_or(false) {
-                                        cursor = page_info.endCursor.clone();
+                                if let Some(page_info) = &search.page_info {
+                                    if page_info.has_next_page.unwrap_or(false) {
+                                        cursor = page_info.end_cursor.clone();
                                     } else {
                                         break;
                                     }
@@ -1240,8 +1258,10 @@ pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMem
         author: Option<Author>,
         body: Option<String>,
         comments: Option<Comments>,
-        createdAt: DateTime<Utc>,
-        upvoteCount: Option<u32>,
+        #[serde(rename = "createdAt")]
+        created_at: DateTime<Utc>,
+        #[serde(rename = "upvoteCount")]
+        upvote_count: Option<u32>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1267,7 +1287,6 @@ pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMem
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let base_url = "https://api.github.com/graphql";
-    let mut results_list: Vec<String> = Vec::new();
 
     let query = format!(
         r#"
@@ -1320,7 +1339,7 @@ pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMem
                     if let Some(search) = results.data?.search {
                         for edge_option in search.edges?.iter().filter_map(|e| e.as_ref()) {
                             if let Some(discussion) = &edge_option.node {
-                                let date = discussion.createdAt.date_naive();
+                                let date = discussion.created_at.date_naive();
                                 let title = discussion.title
                                     .as_ref()
                                     .unwrap_or(&empty_str)
@@ -1332,7 +1351,7 @@ pub async fn search_discussions(search_query: &str) -> Option<(usize, Vec<GitMem
                                     .unwrap_or(&empty_str)
                                     .to_string();
 
-                                let upvotes_str = match discussion.upvoteCount {
+                                let upvotes_str = match discussion.upvote_count {
                                     Some(c) if c > 0 => format!("Upvotes: {}", c),
                                     _ => "".to_string(),
                                 };
@@ -1399,11 +1418,13 @@ pub async fn search_users(search_query: &str) -> Option<String> {
         name: Option<String>,
         login: Option<String>,
         url: Option<String>,
-        twitterUsername: Option<String>,
+        #[serde(rename = "twitterUsername")]
+        twitter_username: Option<String>,
         bio: Option<String>,
         company: Option<String>,
         location: Option<String>,
-        createdAt: Option<DateTime<Utc>>,
+        #[serde(rename = "createdAt")]
+        created_at: Option<DateTime<Utc>>,
         email: Option<String>,
     }
 
@@ -1489,7 +1510,7 @@ pub async fn search_users(search_query: &str) -> Option<String> {
                                             None => String::new(),
                                         };
 
-                                        let twitter_str = match &user.twitterUsername {
+                                        let twitter_str = match &user.twitter_username {
                                             Some(twitter) => format!("Twitter: {},", twitter),
                                             None => String::new(),
                                         };
@@ -1509,7 +1530,7 @@ pub async fn search_users(search_query: &str) -> Option<String> {
                                             None => String::new(),
                                         };
 
-                                        let date_str = match &user.createdAt {
+                                        let date_str = match &user.created_at {
                                             Some(date) => {
                                                 format!(
                                                     "Created At: {},",

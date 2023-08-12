@@ -206,7 +206,8 @@ pub struct Project {
     pub creator: User,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -226,7 +227,8 @@ pub struct ProjectColumn {
     pub name: String,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -304,7 +306,8 @@ pub struct Milestone {
     pub closed_issues: Option<i64>,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -453,7 +456,8 @@ pub struct Repository {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -494,7 +498,8 @@ pub struct RepositoryMetrics {
     pub description: Option<String>,
     pub documentation: Option<String>,
     pub files: HashMap<String, Option<RepositoryFile>>,
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
     pub content_reports_enabled: Option<bool>,
 }
 
@@ -612,7 +617,8 @@ pub struct Status {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
+       #[serde(rename = "updatedAt")]
+   pub updated_at: Option<DateTime<Utc>>,
     pub state: StatusState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<User>,
