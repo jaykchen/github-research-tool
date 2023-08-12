@@ -34,7 +34,7 @@ pub async fn run() {
     // the author hasn't figured out how to achieve the run once in programs' lifetime,
     // you need to disable this line after first successful run
     // compile the program again and run it again.
-    let _ = register_commands(&discord_token).await;
+    // let _ = register_commands(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
@@ -158,7 +158,7 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
             }
 
             match process_commits(commits_vec).await {
-                Some((a, _,_)) => commits_summaries = a,
+                Some((a, _, _)) => commits_summaries = a,
                 None => {}
             };
         }
@@ -243,9 +243,10 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
     }
 
     let resp_content = correlate_commits_issues_discussions(
-        &commits_summaries,
-        &issues_summaries,
-        &discussion_data,
+        Some(&commits_summaries),
+        Some(&issues_summaries),
+        Some(&discussion_data),
+        user_name,
     )
     .await
     .unwrap_or("Failed to generate report.".to_string());
