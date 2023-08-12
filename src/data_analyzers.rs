@@ -1,8 +1,69 @@
 use crate::github_data_fetchers::*;
 use crate::octocrab_compat::Issue;
 use crate::utils::*;
+use chrono::{DateTime, Utc};
 use log;
+use serde::Deserialize;
 use std::env;
+
+pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
+    #[derive(Deserialize, Debug)]
+    struct CommunityProfile {
+        health_percentage: u16,
+        description: Option<String>,
+        readme: Option<String>,
+        updated_at: Option<DateTime<Utc>>,
+    }
+
+    let github_token = env::var("github_token").unwrap_or_else(|_| "fake-token".to_string());
+    let community_profile_url = format!(
+        "https://api.github.com/repos/{}/{}/community/profile",
+        owner, repo
+    );
+
+    match github_http_fetch(&github_token, &community_profile_url).await {
+        Some(res) => match serde_json::from_slice::<CommunityProfile>(&res) {
+            Ok(profile) => {
+                let description_content = profile
+                    .description
+                    .as_ref()
+                    .unwrap_or(&String::from(""))
+                    .to_string();
+
+                let readme_content = match (&profile.readme, &profile.description) {
+                    (Some(_), _) => get_readme(owner, repo).await.unwrap_or_default(),
+                    (None, Some(description)) => description.clone(),
+                    (None, None) => String::new(),
+                };
+
+                Some(GitMemory {
+                    memory_type: MemoryType::Meta,
+                    name: format!("{}/{}", owner, repo),
+                    tag_line: description_content,
+                    source_url: community_profile_url,
+                    payload: readme_content,
+                    date: profile
+                        .updated_at
+                        .map(|dt| dt.date().naive_utc())
+                        .unwrap_or_else(|| Utc::today().naive_utc()),
+                })
+            }
+            Err(e) => {
+                log::error!("Error parsing Community Profile: {:?}", e);
+                None
+            }
+        },
+        None => {
+            log::error!(
+                "Error fetching Community Profile: {:?}",
+                community_profile_url
+            );
+            None
+        }
+    }
+}
+
+// ... include the github_http_fetch, get_readme and other necessary functions here ...
 
 pub async fn process_issues(
     inp_vec: Vec<Issue>,

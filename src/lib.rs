@@ -101,6 +101,32 @@ async fn handle_weekly_report<B: Bot>(bot: &B, client: &Http, ac: ApplicationCom
         _ => panic!("Expected string for repo"),
     };
 
+    let mut profile_data = None;
+    match is_valid_owner_repo(owner, repo).await{
+                    None=> {
+
+
+                        match client
+                        .edit_original_interaction_response(
+                            &ac.token,
+                            &(serde_json::json!({
+                                "content": "You've entered invalid owner/repo, or the target is private. Please try again."
+                            })),
+                        )
+                        .await
+                    {
+                        Ok(_) => return,
+                        Err(_e) => {
+                            log::error!("error sending commit count: {:?}", _e);
+                            return;
+                    }
+                    }
+                    }
+                    Some(gm)=> profile_data = Some(gm),
+
+
+                        };
+
     let user_name = options.get(2).and_then(|opt| match &opt.resolved {
         Some(CommandDataOptionValue::String(s)) => Some(s.as_str()),
         _ => None,

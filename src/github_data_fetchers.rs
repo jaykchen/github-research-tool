@@ -169,11 +169,11 @@ pub async fn get_commits_in_range(
     struct GithubCommit {
         sha: String,
         html_url: String,
-        author: Option<User>, // made nullable
+        author: Option<User>,    // made nullable
         committer: Option<User>, // made nullable
         commit: CommitDetails,
     }
-    
+
     #[derive(Serialize, Deserialize, Debug)]
     struct CommitDetails {
         author: CommitUserDetails,
@@ -216,7 +216,7 @@ pub async fn get_commits_in_range(
                     if commits.is_empty() {
                         break; // If the page is empty, exit the loop
                     }
-            
+
                     for commit in commits {
                         if let Some(commit_date) = &commit.commit.author.date {
                             if commit_date.date_naive() > n_days_ago {
@@ -233,11 +233,10 @@ pub async fn get_commits_in_range(
                             }
                         }
                     }
-            
+
                     current_page += 1;
                 }
             },
-            
         }
     }
 
@@ -403,40 +402,48 @@ pub async fn get_community_profile_data(owner: &str, repo: &str) -> Option<Strin
 pub async fn get_readme(owner: &str, repo: &str) -> Option<String> {
     #[derive(Deserialize, Debug)]
     struct GithubReadme {
-        // size: usize,
-        // url: String,
-        // html_url: String,
-        content: String,
-        // encoding: String,
+        content: Option<String>,
     }
 
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
     let readme_url = format!("https://api.github.com/repos/{owner}/{repo}/readme");
+
     match github_http_fetch(&github_token, &readme_url).await {
         Some(res) => match serde_json::from_slice::<GithubReadme>(&res) {
             Ok(readme) => {
-                let cleaned_content = readme.content.replace("\n", "");
-                match base64::decode(&cleaned_content) {
-                    Ok(decoded_content) => {
-                        match &String::from_utf8(decoded_content) {
+                if let Some(c) = readme.content {
+                    let cleaned_content = c.replace("\n", "");
+                    match base64::decode(&cleaned_content) {
+                        Ok(decoded_content) => match String::from_utf8(decoded_content) {
                             Ok(out) => {
-                                let truncated = squeeze_fit_remove_quoted(out, "```", 2000, 0.6);
-                                return Some(format!("Readme: {truncated}"));
+                                let truncated = squeeze_fit_remove_quoted(&out, "```", 2000, 0.6);
+                                return Some(format!("Readme: {}", truncated));
                             }
-                            Err(_e) => {
-                                log::error!("failed to convert cleaned readme to String: {_e}");
+                            Err(e) => {
+                                log::error!("Failed to convert cleaned readme to String: {:?}", e);
                                 return None;
                             }
-                        };
+                        },
+                        Err(e) => {
+                            log::error!("Error decoding base64 content: {:?}", e);
+                            None
+                        }
                     }
-                    Err(_) => log::error!("Error decoding base64 content."),
+                } else {
+                    log::error!("Content field in readme is null.");
+                    None
                 }
             }
-            Err(e) => log::error!("Error parsing Readme: {:?}", e),
+            Err(e) => {
+                log::error!("Error parsing Readme: {:?}", e);
+                None
+            }
         },
-        None => log::error!("Github readme not found."),
+        None => {
+            log::error!("Github readme not found.");
+            None
+        }
     }
-    None
 }
 
 pub async fn is_new_contributor(owner: &str, repo: &str, user_name: &str) -> bool {

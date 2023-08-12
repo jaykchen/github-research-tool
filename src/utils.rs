@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use store_flows::{get, set};
 
-/* 
+/*
 use crypto::{symmetriccipher, buffer, aes, blockmodes};
 use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
 use rand::Rng;
@@ -27,7 +27,7 @@ fn gen_key(url: &str, username: &str) -> String {
 fn get_vals(hex_key: &str) -> (String, String) {
     let encrypted_bytes = hex::decode(&hex_key).expect("Failed to decode hex");
     let decrypted_bytes = decrypt(&encrypted_bytes, KEY, IV).expect("Failed to decrypt");
-    
+
     let decrypted_str = str::from_utf8(&decrypted_bytes).unwrap();
     let parts: Vec<&str> = decrypted_str.split('+').collect();
     (parts[0].to_string(), parts[1].to_string())
