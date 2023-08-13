@@ -193,82 +193,84 @@ pub async fn correlate_commits_issues_discussions(
     _discussions_summary: Option<&str>,
     target_person: Option<&str>,
 ) -> Option<String> {
-    if _commits_summary.is_none() && _issues_summary.is_none() && _discussions_summary.is_none() && _profile_data.is_some() {
+    if _commits_summary.is_none() && _issues_summary.is_none() && _discussions_summary.is_none() {
         return None;
-    }
-    let total_space = 16000; // 16k tokens
+    } else {
+        let total_space = 16000; // 16k tokens
 
-    let total_ratio = 11.0; // 1 + 4 + 4 + 2
-    let profile_ratio = 1.0;
-    let commit_ratio = 4.0;
-    let issue_ratio = 4.0;
-    let discussion_ratio = 2.0;
+        let total_ratio = 11.0; // 1 + 4 + 4 + 2
+        let profile_ratio = 1.0;
+        let commit_ratio = 4.0;
+        let issue_ratio = 4.0;
+        let discussion_ratio = 2.0;
 
-    let available_ratios = [
-        _profile_data.map(|_| profile_ratio),
-        _commits_summary.map(|_| commit_ratio),
-        _issues_summary.map(|_| issue_ratio),
-        _discussions_summary.map(|_| discussion_ratio),
-    ];
+        let available_ratios = [
+            _profile_data.map(|_| profile_ratio),
+            _commits_summary.map(|_| commit_ratio),
+            _issues_summary.map(|_| issue_ratio),
+            _discussions_summary.map(|_| discussion_ratio),
+        ];
 
-    let total_available_ratio: f32 = available_ratios.iter().filter_map(|&x| x).sum();
+        let total_available_ratio: f32 = available_ratios.iter().filter_map(|&x| x).sum();
 
-    let compute_space =
-        |ratio: f32| -> usize { ((total_space as f32) * (ratio / total_available_ratio)) as usize };
+        let compute_space = |ratio: f32| -> usize {
+            ((total_space as f32) * (ratio / total_available_ratio)) as usize
+        };
 
-    let profile_space = _profile_data.map_or(0, |_| compute_space(profile_ratio));
-    let commit_space = _commits_summary.map_or(0, |_| compute_space(commit_ratio));
-    let issue_space = _issues_summary.map_or(0, |_| compute_space(issue_ratio));
-    let discussion_space = _discussions_summary.map_or(0, |_| compute_space(discussion_ratio));
+        let profile_space = _profile_data.map_or(0, |_| compute_space(profile_ratio));
+        let commit_space = _commits_summary.map_or(0, |_| compute_space(commit_ratio));
+        let issue_space = _issues_summary.map_or(0, |_| compute_space(issue_ratio));
+        let discussion_space = _discussions_summary.map_or(0, |_| compute_space(discussion_ratio));
 
-    let trim_to_allocated_space =
-        |source: &str, space: usize| -> String { source.chars().take(space * 3).collect() };
+        let trim_to_allocated_space =
+            |source: &str, space: usize| -> String { source.chars().take(space * 3).collect() };
 
-    let profile_str = _profile_data.map_or("".to_string(), |x| {
-        format!(
-            "profile data: {}",
-            trim_to_allocated_space(x, profile_space)
-        )
-    });
-    let commits_str = _commits_summary.map_or("".to_string(), |x| {
-        format!("commit logs: {}", trim_to_allocated_space(x, commit_space))
-    });
-    let issues_str = _issues_summary.map_or("".to_string(), |x| {
-        format!("issue post: {}", trim_to_allocated_space(x, issue_space))
-    });
-    let discussions_str = _discussions_summary.map_or("".to_string(), |x| {
-        format!(
-            "discussion posts: {}",
-            trim_to_allocated_space(x, discussion_space)
-        )
-    });
+        let profile_str = _profile_data.map_or("".to_string(), |x| {
+            format!(
+                "profile data: {}",
+                trim_to_allocated_space(x, profile_space)
+            )
+        });
+        let commits_str = _commits_summary.map_or("".to_string(), |x| {
+            format!("commit logs: {}", trim_to_allocated_space(x, commit_space))
+        });
+        let issues_str = _issues_summary.map_or("".to_string(), |x| {
+            format!("issue post: {}", trim_to_allocated_space(x, issue_space))
+        });
+        let discussions_str = _discussions_summary.map_or("".to_string(), |x| {
+            format!(
+                "discussion posts: {}",
+                trim_to_allocated_space(x, discussion_space)
+            )
+        });
 
-    let target_str = match target_person {
-        Some(person) => format!("{}'s", person),
-        None => "key participants'".to_string(),
-    };
+        let target_str = match target_person {
+            Some(person) => format!("{}'s", person),
+            None => "key participants'".to_string(),
+        };
 
-    let sys_prompt_1 =
+        let sys_prompt_1 =
         "Analyze the GitHub activity data and profile data over the week to detect both key impactful contributions and connections between commits, issues, and discussions. Highlight specific code changes, resolutions, and improvements. Furthermore, trace evidence of commits addressing specific issues, discussions leading to commits, or issues spurred by discussions. The aim is to map out both the impactful technical advancements and the developmental narrative of the project.";
 
-    let usr_prompt_1 = &format!(
+        let usr_prompt_1 = &format!(
         "From {profile_str}, {commits_str}, {issues_str}, and {discussions_str}, detail {target_str}'s significant technical contributions. Enumerate individual tasks, code enhancements, and bug resolutions, emphasizing impactful contributions. Concurrently, identify connections: commits that appear to resolve specific issues, discussions that may have catalyzed certain commits, or issues influenced by preceding discussions. Extract tangible instances showcasing both impact and interconnections within the week."
     );
 
-    let usr_prompt_2 = &format!(
+        let usr_prompt_2 = &format!(
         "Merge the identified impactful technical contributions and their interconnections into a coherent summary for {target_str} over the week. Describe how these contributions align with the project's technical objectives. Pinpoint recurring technical patterns or trends and shed light on the synergy between individual efforts and their collective progression. Detail both the weight of each contribution and their interconnectedness in shaping the project. Limit to 256 tokens."
     );
 
-    chain_of_chat(
-        sys_prompt_1,
-        usr_prompt_1,
-        "correlate-99",
-        512,
-        usr_prompt_2,
-        256,
-        "correlate_commits_issues_discussions",
-    )
-    .await
+        return chain_of_chat(
+            sys_prompt_1,
+            usr_prompt_1,
+            "correlate-99",
+            512,
+            usr_prompt_2,
+            256,
+            "correlate_commits_issues_discussions",
+        )
+        .await;
+    }
 }
 
 pub async fn correlate_user_and_home_project(
