@@ -6,10 +6,6 @@ pub mod reports;
 pub mod utils;
 use chrono::{ Duration, Utc };
 use data_analyzers::*;
-// use discord_flows::model::interactions::application_command::{
-//     // ApplicationCommand,
-//     ApplicationCommandInteraction,
-// };
 use discord_flows::{
     model::application::interaction::application_command::ApplicationCommandInteraction,
     http::Http,
@@ -23,7 +19,7 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
-use serde_json;
+use serde_json::Value;
 use slack_flows::send_message_to_channel;
 use std::env;
 use tokio::time::{ sleep };
@@ -47,6 +43,7 @@ pub async fn run() {
 
 async fn handle<B: Bot>(bot: &B, em: EventModel) {
     let client = bot.get_client();
+    let mut report = String::new();
     match em {
         EventModel::ApplicationCommand(ac) => {
             let initial_response =
@@ -87,6 +84,7 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
 async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
     let options = &ac.data.options;
     let n_days = 7u16;
+    let mut report = String::new();
     let owner = match
         options
             .get(0)
@@ -112,24 +110,13 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     let mut _profile_data = None;
     match is_valid_owner_repo(owner, repo).await {
         None => {
-            let _ = sleep(tokio::time::Duration::from_secs(1)).await;
-
-            match
-                client.edit_original_interaction_response(
-                    &ac.token,
-                    &serde_json::json!({
-                                "content": "You've entered invalid owner/repo, or the target is private. Please try again."
-                            })
-                ).await
-            {
-                Ok(_) => {
-                    return;
-                }
-                Err(_e) => {
-                    log::error!("error sending owner/repo check failure message: {:?}", _e);
-                    return;
-                }
-            }
+            sleep(tokio::time::Duration::from_secs(1)).await;
+            let _ = send_discord_msg(
+                client,
+                &ac.token,
+                "You've entered invalid owner/repo, or the target is private. Please try again."
+            ).await;
+            return;
         }
         Some(gm) => {
             _profile_data = Some(gm.payload);
@@ -137,72 +124,44 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     }
 
     let user_name = options.get(2).and_then(|opt| {
-        match &opt.resolved {
-            Some(CommandDataOptionValue::String(s)) => Some(s.as_str()),
-            _ => None,
-        }
+        opt.resolved.as_ref().and_then(|val| {
+            match val {
+                CommandDataOptionValue::String(s) => Some(s.as_str()),
+                _ => None,
+            }
+        })
     });
 
-    if let Some(user_name) = user_name {
-        match is_code_contributor(owner, repo, user_name).await {
-            false => {
-                let _ = sleep(tokio::time::Duration::from_secs(1)).await;
-                match
-                    client.edit_original_interaction_response(
-                        &ac.token,
-                        &serde_json::json!({
-                "content": format!("{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions."),
-            })
-                    ).await
-                {
-                    Ok(_) => {}
-                    Err(_e) => {
-                        log::error!(
-                            "error sending is_code_contributor check failure message: {:?}",
-                            _e
-                        );
-                    }
-                }
+    match user_name {
+        Some(user_name) => {
+            if !is_code_contributor(owner, repo, &user_name).await {
+                sleep(tokio::time::Duration::from_secs(1)).await;
+                let content = format!(
+                    "{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions."
+                );
+                let _ = send_discord_msg(client, &ac.token, &content).await;
             }
-
-            true => {}
         }
-    } else {
-        match
-            client.edit_original_interaction_response(
-                &ac.token,
-                &serde_json::json!({
-"content": format!("You didn't input a user's name. Bot will then create a report on the weekly progress of {owner}/{repo}."),
-})
-            ).await
-        {
-            Ok(_) => {}
-            Err(_e) => {
-                log::error!("error sending no-user_name acknowledgement message: {:?}", _e);
-            }
+        None => {
+            let content = format!(
+                "You didn't input a user's name. Bot will then create a report on the weekly progress of {owner}/{repo}."
+            );
+            let _ = send_discord_msg(client, &ac.token, &content).await;
         }
     }
 
-    let addressee_str = user_name.map_or(String::from("key community participants'"), |n| {
+    let addressee_str = user_name.map_or(String::from("key community participants'"), |n|
         format!("{n}'s")
-    });
+    );
 
     let start_msg_str = format!(
         "exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project"
     );
-    match
-        client.edit_original_interaction_response(
-            &ac.token,
-            &serde_json::json!({
-                "content": start_msg_str
-            })
-        ).await
-    {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending start_msg_str: {:?}", _e),
-    }
+    sleep(tokio::time::Duration::from_secs(1)).await;
 
-    let mut commits_summaries = String::from("");
+    let _ = send_discord_msg(client, &ac.token, &start_msg_str).await;
+
+    let mut commits_summaries = String::new();
 
     match get_commits_in_range(&owner, &repo, user_name, n_days).await {
         Some((count, commits_vec)) => {
@@ -220,30 +179,22 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<String>>()
                 .join(", ");
             let commits_msg_str = format!("found {count} commits: {commits_str}");
+            report.push_str(commits_msg_str.as_str());
+            let _ = send_discord_msg(client, &ac.token, &commits_msg_str).await;
 
-            match
-                client.edit_original_interaction_response(
-                    &ac.token,
-                    &serde_json::json!({
-                        "content": commits_msg_str
-                    })
-                ).await
-            {
-                Ok(_) => {}
-                Err(_e) => log::error!("error sending commit count: {:?}", _e),
+            if let Some((a, _, commit_vec)) = process_commits(commits_vec).await {
+                let text = commit_vec
+                    .into_iter()
+                    .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.tag_line))
+                    .collect::<Vec<String>>()
+                    .join("");
+                send_message_to_channel("ik8", "ch_rep", text).await;
+                commits_summaries = a;
             }
-
-            match process_commits(commits_vec).await {
-                Some((a, _, _)) => {
-                    commits_summaries = a;
-                }
-                None => {}
-            };
         }
-        None => {}
+        None => log::error!("failed to get commits"),
     }
-
-    let mut issues_summaries = String::from("");
+    let mut issues_summaries = String::new();
 
     match get_issues_in_range(&owner, &repo, user_name, n_days).await {
         Some((count, issue_vec)) => {
@@ -253,27 +204,21 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<&str>>()
                 .join(", ");
             let issues_msg_str = format!("found {} issues: {}", count, issues_str);
+            report.push_str(issues_msg_str.as_str());
+            let _ = send_discord_msg(client, &ac.token, &issues_msg_str).await;
 
-            match
-                client.edit_original_interaction_response(
-                    &ac.token,
-                    &serde_json::json!({
-                        "content": issues_msg_str
-                    })
-                ).await
-            {
-                Ok(_) => {}
-                Err(_e) => log::error!("error sending issues count: {:?}", _e),
-            }
+            if let Some((summary, _, issues_vec)) = process_issues(issue_vec, user_name).await {
+                let text = issues_vec
+                    .into_iter()
+                    .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.tag_line))
+                    .collect::<Vec<String>>()
+                    .join("");
+                send_message_to_channel("ik8", "ch_iss", text).await;
 
-            match process_issues(issue_vec, user_name).await {
-                Some((summary, _, _)) => {
-                    issues_summaries = summary;
-                }
-                None => {}
+                issues_summaries = summary;
             };
         }
-        None => {} // Handle the case where get_issues_in_range returns None if needed
+        None => log::error!("failed to get issues"),
     }
 
     let now = Utc::now();
@@ -282,8 +227,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
 
     let discussion_query = format!("involves:{} updated:>{}", user_name.unwrap(), a_week_ago_str);
 
-    let mut discussion_data = String::from("");
-
+    let mut discussion_data = String::new();
     match search_discussions(&discussion_query).await {
         Some((count, discussion_vec)) => {
             let discussions_str = discussion_vec
@@ -294,22 +238,22 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<&str>>()
                 .join(", ");
             let discussions_msg_str = format!("found {} discussions: {}", count, discussions_str);
+            report.push_str(discussions_msg_str.as_str());
+            let _ = send_discord_msg(client, &ac.token, &discussions_msg_str).await;
 
-            match
-                client.edit_original_interaction_response(
-                    &ac.token,
-                    &serde_json::json!({
-                        "content": discussions_msg_str
-                    })
-                ).await
-            {
-                Ok(_) => {}
-                Err(_e) => log::error!("error sending discussions message: {:?}", _e),
-            }
+            let (a,discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
 
-            discussion_data = analyze_discussions(discussion_vec, user_name).await.0;
+            let text = discussions_vec
+                .into_iter()
+                .map(|dis| format!("\n{}: {}\n", dis.source_url, dis.tag_line))
+                .collect::<Vec<String>>()
+                .join("");
+            send_message_to_channel("ik8", "ch_dis", text).await;
+            discussion_data = a;
+
+
         }
-        None => {} // Handle the case where search_discussions returns None if needed
+        None => log::error!("failed to get discussions"),
     }
 
     let resp_content = correlate_commits_issues_discussions(
@@ -318,19 +262,26 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         Some(&discussion_data),
         user_name
     ).await.unwrap_or("Failed to generate report.".to_string());
-    // let head = resp_content.chars().take(1000).collect::<String>();
-    // send_message_to_channel("ik8", "ch_home", head).await;
+    report.push_str(resp_content.as_str());
+    let _ = send_discord_msg(client, &ac.token, &report).await;
+}
 
+async fn send_discord_msg(
+    client: &Http,
+    token: &str,
+    content: &str
+) -> Result<(), Box<dyn std::error::Error>> {
     match
         client.edit_original_interaction_response(
-            &ac.token,
-            &serde_json::json!({
-                "content": resp_content.to_string()
-            })
+            token,
+            &serde_json::json!({ "content": content })
         ).await
     {
-        Ok(_) => {}
-        Err(_e) => log::error!("error sending weekly_report message: {:?}", _e),
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log::error!("error sending message: {:?}", e);
+            Err(Box::new(e))
+        }
     }
 }
 
