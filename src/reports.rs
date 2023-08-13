@@ -37,7 +37,7 @@ pub async fn weekly_report(
     None // This is the default return for when user_name is None
 }
 
-pub async fn new_contributor_report(owner: &str, repo: &str, user_name: &str) -> Option<String> {
+pub async fn new_contributor_report(github_token: &str, owner: &str, repo: &str, user_name: &str) -> Option<String> {
     let mut home_repo_data = get_readme(owner, repo).await.unwrap_or("".to_string());
     match get_community_profile_data(owner, repo).await {
         Some(community_profile_data) => {
@@ -96,7 +96,7 @@ pub async fn current_contributor_report(
 
     Some("".to_string())
 }
-pub async fn current_repo_report(owner: &str, repo: &str) -> Option<String> {
+pub async fn current_repo_report(github_token: &str, owner: &str, repo: &str) -> Option<String> {
     Some("".to_string())
 }
  */

@@ -8,18 +8,16 @@ use chrono::{Duration, Utc};
 use data_analyzers::*;
 use discord_flows::{
     http::Http,
-    model::application::interaction::application_command::ApplicationCommandInteraction,
-    model::application_command::CommandDataOptionValue,
-    // model::{ application_command::CommandDataOptionValue, channel, guild, Interaction },
-    Bot,
-    EventModel,
-    ProvidedBot,
+    model::{
+        application::interaction::application_command::ApplicationCommandInteraction,
+        application_command::CommandDataOptionValue,
+    },
+    Bot, EventModel, ProvidedBot,
 };
 use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
-use serde_json::Value;
 use slack_flows::send_message_to_channel;
 use std::env;
 use tokio::time::sleep;
@@ -35,33 +33,37 @@ pub async fn run() {
     // the author hasn't figured out how to achieve the run once in programs' lifetime,
     // you need to disable this line after first successful run
     // compile the program again and run it again.
-    // let _ = register_commands(&discord_token).await;
+    // _ = register_commands(&discord_token).await;
 
     let bot = ProvidedBot::new(discord_token);
     bot.listen(|em| handle(&bot, em)).await;
 }
 
-async fn handle<B: Bot>(bot: &B, em: EventModel) {
-    let client = bot.get_client();
-    let mut report = String::new();
+async fn handle<B: Bot>(_bot: &B, em: EventModel) {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+    let client = _bot.get_client();
+
     match em {
         EventModel::ApplicationCommand(ac) => {
-            let initial_response = serde_json::json!(
-                {
-                    "type": 4,
-                    "data": {
-                        "content": "🤖 ready."
-                    }
-                }
-            );
             _ = client
-                .create_interaction_response(ac.id.into(), &ac.token, &initial_response)
+                .create_interaction_response(
+                    ac.id.into(),
+                    &ac.token,
+                    &(serde_json::json!(
+                        {
+                            "type": 4,
+                            "data": {
+                                "content": "🤖 ready."
+                            }
+                        }
+                    )),
+                )
                 .await;
             client.set_application_id(ac.application_id.into());
 
             match ac.data.name.as_str() {
                 "weekly_report" => {
-                    handle_weekly_report(bot, &client, ac).await;
+                    handle_weekly_report(&github_token, _bot, &client, ac).await;
                 }
                 "get_user_repos" => {
                     // handle_get_user_repos(bot, &client, ac).await;
@@ -78,7 +80,18 @@ async fn handle<B: Bot>(bot: &B, em: EventModel) {
     }
 }
 
-async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
+async fn handle_weekly_report<B: Bot>(
+    github_token: &str,
+    _bot: &B,
+    client: &Http,
+    ac: ApplicationCommandInteraction,
+) {
+    let wait_minutes_msg = || async {
+        _ =  client
+            .edit_original_interaction_response(github_token, &serde_json::json!({ "content": "it may take a few minutes to process, please be patient." }))
+            .await;
+    };
+
     let options = &ac.data.options;
     let n_days = 7u16;
     let mut report = String::new();
@@ -105,10 +118,10 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     };
 
     let mut _profile_data = String::new();
-    match is_valid_owner_repo(owner, repo).await {
+    match is_valid_owner_repo(github_token, owner, repo).await {
         None => {
             sleep(tokio::time::Duration::from_secs(2)).await;
-            let _ = edit_original_wrapped(
+            _ = edit_original_wrapped(
                 client,
                 &ac.token,
                 "You've entered invalid owner/repo, or the target is private. Please try again.",
@@ -131,19 +144,19 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
 
     match user_name {
         Some(user_name) => {
-            if !is_code_contributor(owner, repo, &user_name).await {
+            if !is_code_contributor(github_token, owner, repo, &user_name).await {
                 sleep(tokio::time::Duration::from_secs(2)).await;
                 let content = format!(
                     "{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions."
                 );
-                let _ = edit_original_wrapped(client, &ac.token, &content).await;
+                _ = edit_original_wrapped(client, &ac.token, &content).await;
             }
         }
         None => {
             let content = format!(
                 "You didn't input a user's name. Bot will then create a report on the weekly progress of {owner}/{repo}."
             );
-            let _ = edit_original_wrapped(client, &ac.token, &content).await;
+            _ = edit_original_wrapped(client, &ac.token, &content).await;
         }
     }
 
@@ -155,11 +168,11 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         format!("exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project");
     sleep(tokio::time::Duration::from_secs(2)).await;
 
-    let _ = edit_original_wrapped(client, &ac.token, &start_msg_str).await;
-
+    _ = edit_original_wrapped(client, &ac.token, &start_msg_str).await;
+    wait_minutes_msg().await;
     let mut commits_summaries = String::new();
 
-    match get_commits_in_range(&owner, &repo, user_name, n_days).await {
+    match get_commits_in_range(github_token, &owner, &repo, user_name, n_days).await {
         Some((count, commits_vec)) => {
             let commits_str = commits_vec
                 .iter()
@@ -176,9 +189,9 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .join(", ");
             let commits_msg_str = format!("found {count} commits: {commits_str}");
             report.push_str(&format!("{commits_msg_str}\n"));
-            let _ = edit_original_wrapped(client, &ac.token, &commits_msg_str).await;
+            _ = edit_original_wrapped(client, &ac.token, &commits_msg_str).await;
 
-            if let Some((a, _, commit_vec)) = process_commits(commits_vec).await {
+            if let Some((a, _, commit_vec)) = process_commits(github_token, commits_vec).await {
                 let text = commit_vec
                     .into_iter()
                     .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
@@ -192,7 +205,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     }
     let mut issues_summaries = String::new();
 
-    match get_issues_in_range(&owner, &repo, user_name, n_days).await {
+    match get_issues_in_range(github_token, &owner, &repo, user_name, n_days).await {
         Some((count, issue_vec)) => {
             let issues_str = issue_vec
                 .iter()
@@ -201,9 +214,9 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .join(", ");
             let issues_msg_str = format!("found {} issues: {}", count, issues_str);
             report.push_str(&format!("{issues_msg_str}\n"));
-            let _ = edit_original_wrapped(client, &ac.token, &issues_msg_str).await;
+            _ = edit_original_wrapped(client, &ac.token, &issues_msg_str).await;
 
-            match process_issues(issue_vec, user_name).await {
+            match process_issues(github_token, issue_vec, user_name).await {
                 Some((summary, _, issues_vec)) => {
                     let text = issues_vec
                         .into_iter()
@@ -231,7 +244,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     );
 
     let mut discussion_data = String::new();
-    match search_discussions(&discussion_query).await {
+    match search_discussions(github_token, &discussion_query).await {
         Some((count, discussion_vec)) => {
             let discussions_str = discussion_vec
                 .iter()
@@ -246,7 +259,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .join(", ");
             let discussions_msg_str = format!("found {} discussions: {}", count, discussions_str);
             report.push_str(&format!("{discussions_msg_str}\n"));
-            let _ = edit_original_wrapped(client, &ac.token, &discussions_msg_str).await;
+            _ = edit_original_wrapped(client, &ac.token, &discussions_msg_str).await;
 
             let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
             discussion_data = a;
@@ -291,27 +304,15 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         }
     }
 
-    let _ = edit_original_wrapped(client, &ac.token, &report).await;
+    _ = edit_original_wrapped(client, &ac.token, &report).await;
 }
 
-async fn edit_original_wrapped(
+async fn handle_search<B: Bot>(
+    github_token: &str,
+    _bot: &B,
     client: &Http,
-    token: &str,
-    content: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match client
-        .edit_original_interaction_response(token, &serde_json::json!({ "content": content }))
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            log::error!("error sending message: {:?}", e);
-            Err(Box::new(e))
-        }
-    }
-}
-
-async fn handle_search<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
+    ac: ApplicationCommandInteraction,
+) {
     let options = &ac.data.options;
 
     let search_query = match options
@@ -339,13 +340,17 @@ async fn handle_search<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInt
     let mut search_result = "".to_string();
     match search_type.to_lowercase().as_str() {
         "issue" => {
-            search_result = search_issue(&search_query).await.unwrap_or("".to_string());
+            search_result = search_issue(github_token, &search_query)
+                .await
+                .unwrap_or("".to_string());
         }
         "users" => {
-            search_result = search_users(&search_query).await.unwrap_or("".to_string());
+            search_result = search_users(github_token, &search_query)
+                .await
+                .unwrap_or("".to_string());
         }
         "repository" => {
-            search_result = search_repository(&search_query)
+            search_result = search_repository(github_token, &search_query)
                 .await
                 .unwrap_or("".to_string());
         }
@@ -368,7 +373,12 @@ async fn handle_search<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInt
     }
 }
 
-async fn handle_get_user_repos<B: Bot>(bot: &B, client: &Http, ac: ApplicationCommandInteraction) {
+async fn handle_get_user_repos<B: Bot>(
+    github_token: &str,
+    _bot: &B,
+    client: &Http,
+    ac: ApplicationCommandInteraction,
+) {
     let options = &ac.data.options;
 
     let username = match options
@@ -393,7 +403,7 @@ async fn handle_get_user_repos<B: Bot>(bot: &B, client: &Http, ac: ApplicationCo
         _ => panic!("Expected string for language"),
     };
 
-    let user_repos = get_user_repos_gql(&username, &language)
+    let user_repos = get_user_repos_gql(github_token, &username, &language)
         .await
         .unwrap_or("Couldn't get any repos!".to_string());
 

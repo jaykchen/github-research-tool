@@ -1,15 +1,7 @@
+use discord_flows::http::Http;
 use discord_flows::http::HttpBuilder;
 use serde_json;
 use std::env;
-
-// pub async fn register_once(discord_token: &str) {
-//     let mut registered = false;
-
-//     let discord_token = env::var("discord_token").unwrap();
-//     if !registered {
-//         register_commands(&discord_token).await;
-//     }
-// }
 
 pub async fn register_commands(discord_token: &str) -> bool {
     let command_weekly_report = serde_json::json!({
@@ -100,6 +92,23 @@ pub async fn register_commands(discord_token: &str) -> bool {
         Err(err) => {
             log::error!("Error registering command: {}", err);
             false
+        }
+    }
+}
+
+pub async fn edit_original_wrapped(
+    client: &Http,
+    token: &str,
+    content: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match client
+        .edit_original_interaction_response(token, &serde_json::json!({ "content": content }))
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log::error!("error sending message: {:?}", e);
+            Err(Box::new(e))
         }
     }
 }

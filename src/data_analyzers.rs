@@ -4,9 +4,8 @@ use crate::utils::*;
 use chrono::{DateTime, Utc};
 use log;
 use serde::Deserialize;
-use std::env;
 
-pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
+pub async fn is_valid_owner_repo(github_token: &str, owner: &str, repo: &str) -> Option<GitMemory> {
     #[derive(Deserialize)]
     struct CommunityProfile {
         health_percentage: u16,
@@ -15,7 +14,6 @@ pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
         updated_at: Option<DateTime<Utc>>,
     }
 
-    let github_token = env::var("github_token").unwrap_or_else(|_| "fake-token".to_string());
     let community_profile_url = format!(
         "https://api.github.com/repos/{}/{}/community/profile",
         owner, repo
@@ -31,7 +29,9 @@ pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
                     .to_string();
 
                 let readme_content = match &profile.readme {
-                    Some(_) => get_readme(owner, repo).await.unwrap_or_default(),
+                    Some(_) => get_readme(github_token, owner, repo)
+                        .await
+                        .unwrap_or_default(),
                     None => description_content.clone(),
                 };
 
@@ -61,6 +61,7 @@ pub async fn is_valid_owner_repo(owner: &str, repo: &str) -> Option<GitMemory> {
     }
 }
 pub async fn process_issues(
+    github_token: &str,
     inp_vec: Vec<Issue>,
     target_person: Option<&str>,
 ) -> Option<(String, usize, Vec<GitMemory>)> {
@@ -68,16 +69,14 @@ pub async fn process_issues(
     let mut git_memory_vec = vec![];
 
     for issue in &inp_vec {
-        match get_issue_texts(issue).await {
-            Some(text) => {
-                match analyze_issue(issue, target_person, &text).await {
-                    None => log::error!("Error analyzing an issue. {:?}", issue.url.to_string()),
-                    Some((summary, gm)) => {
-                        issues_summaries.push_str(&format!("{} {}\n", gm.date, summary));
-                        git_memory_vec.push(gm);
-                    }
+        match get_issue_texts(github_token, issue).await {
+            Some(text) => match analyze_issue(issue, target_person, &text).await {
+                None => log::error!("Error analyzing an issue. {:?}", issue.url.to_string()),
+                Some((summary, gm)) => {
+                    issues_summaries.push_str(&format!("{} {}\n", gm.date, summary));
+                    git_memory_vec.push(gm);
                 }
-            }
+            },
             None => log::error!("Error fetching issue texts: {:?}", issue.url.to_string()),
         }
     }
@@ -89,47 +88,68 @@ pub async fn process_issues(
     }
     Some((issues_summaries, count, git_memory_vec))
 }
+pub async fn analyze_issue(
+    issue: &Issue,
+    target_person: Option<&str>,
+    all_text: &str,
+) -> Option<(String, GitMemory)> {
+    let issue_creator_name = issue.user.login.to_string();
+    let issue_number = issue.number;
+    let issue_title = issue.title.to_string();
 
-pub async fn process_commits(inp_vec: Vec<GitMemory>) -> Option<(String, usize, Vec<GitMemory>)> {
-    let mut commits_summaries = String::new();
-    let mut git_memory_vec = vec![];
-    let mut inp_vec = inp_vec;
-    for commit_obj in inp_vec.drain(..) {
-        match analyze_commit(
-            &commit_obj.name,
-            &commit_obj.tag_line,
-            &commit_obj.source_url,
-        )
-        .await
-        {
-            Some(summary) => {
-                let mut commit_obj = commit_obj; // to make it mutable
-                commit_obj.payload = summary;
+    let issue_date = issue.created_at.date_naive();
+    let issue_url = issue.url.to_string();
+    let target_str = target_person.unwrap_or("key participants");
 
-                if commits_summaries.len() <= 45_000 {
-                    commits_summaries
-                        .push_str(&format!("{} {}\n", commit_obj.date, commit_obj.payload));
-                }
+    let sys_prompt_1 = &format!(
+        "Given the information that user '{issue_creator_name}' opened an issue titled '{issue_title}', your task is to analyze the content of the issue posts. Extract key details including the main problem or question raised, the environment in which the issue occurred, any steps taken by the user and commenters to address the problem, relevant discussions, and any identified solutions, consesus reached, or pending tasks."
+    );
+    let usr_prompt_1 = &format!(
+        "Based on the GitHub issue posts: {all_text}, please list the following key details: The main problem or question raised in the issue. The environment or conditions in which the issue occurred (e.g., hardware, OS). Any steps or actions taken by the user or commenters to address the issue. Key discussions or points of view shared by participants in the issue thread. Any solutions identified, consensus reached, or pending tasks if the issue hasn't been resolved. The role and contribution of the user or commenters in the issue."
+    );
+    let usr_prompt_2 = &format!(
+        "Provide a brief summary highlighting the core problem and emphasize the overarching contribution made by '{target_str}' to the resolution of this issue, ensuring your response stays under 128 tokens."
+    );
 
-                git_memory_vec.push(commit_obj);
-            }
-            None => {
-                log::error!(
-                    "Error analyzing commit {:?} for user {}",
-                    commit_obj.source_url,
-                    commit_obj.name
-                );
-            }
+    match chain_of_chat(
+        sys_prompt_1,
+        usr_prompt_1,
+        &format!("issue_{issue_number}"),
+        256,
+        usr_prompt_2,
+        128,
+        &format!("Error generatng issue summary #{issue_number}"),
+    )
+    .await
+    {
+        Some(issue_summary) => {
+            let mut out = format!("{issue_url} ");
+            out.push_str(&issue_summary);
+            let name = target_person.unwrap_or(&issue_creator_name).to_string();
+            let gm = GitMemory {
+                memory_type: MemoryType::Issue,
+                name: name,
+                tag_line: issue_title,
+                source_url: issue_url,
+                payload: out.clone(),
+                date: issue_date,
+            };
+
+            Some((out, gm))
+        }
+        None => {
+            log::error!("Error generating issue summary #{issue_number}");
+            None
         }
     }
-
-    let count = git_memory_vec.len();
-    Some((commits_summaries, count, git_memory_vec))
 }
 
-pub async fn analyze_commit(user_name: &str, tag_line: &str, url: &str) -> Option<String> {
-    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
-
+pub async fn analyze_commit(
+    github_token: &str,
+    user_name: &str,
+    tag_line: &str,
+    url: &str,
+) -> Option<String> {
     let commit_patch_str = format!("{url}.patch");
     match github_http_fetch(&github_token, &commit_patch_str).await {
         Some(res) => {
@@ -164,6 +184,92 @@ pub async fn analyze_commit(user_name: &str, tag_line: &str, url: &str) -> Optio
         }
         None => None,
     }
+}
+
+pub async fn process_commits(
+    github_token: &str,
+    inp_vec: Vec<GitMemory>,
+) -> Option<(String, usize, Vec<GitMemory>)> {
+    let mut commits_summaries = String::new();
+    let mut git_memory_vec = vec![];
+    let mut inp_vec = inp_vec;
+    for commit_obj in inp_vec.drain(..) {
+        match analyze_commit(
+            github_token,
+            &commit_obj.name,
+            &commit_obj.tag_line,
+            &commit_obj.source_url,
+        )
+        .await
+        {
+            Some(summary) => {
+                let mut commit_obj = commit_obj; // to make it mutable
+                commit_obj.payload = summary;
+
+                if commits_summaries.len() <= 45_000 {
+                    commits_summaries
+                        .push_str(&format!("{} {}\n", commit_obj.date, commit_obj.payload));
+                }
+
+                git_memory_vec.push(commit_obj);
+            }
+            None => {
+                log::error!(
+                    "Error analyzing commit {:?} for user {}",
+                    commit_obj.source_url,
+                    commit_obj.name
+                );
+            }
+        }
+    }
+
+    let count = git_memory_vec.len();
+    Some((commits_summaries, count, git_memory_vec))
+}
+
+pub async fn analyze_discussions(
+    mut discussions: Vec<GitMemory>,
+    target_person: Option<&str>,
+) -> (String, Vec<GitMemory>) {
+    let target_str = target_person.unwrap_or("key participants");
+    let sys_prompt_1 =
+        "Given the information on a GitHub discussion, your task is to analyze the content of the discussion posts. Extract key details including the main topic or question raised, any steps taken by the original author and commenters to address the problem, relevant discussions, and any identified solutions, consensus reached, or pending tasks.";
+
+    let mut text_out = "".to_string();
+    for gm in discussions.iter_mut() {
+        let usr_prompt_1 = &format!(
+            "Based on the GitHub discussion post: {}, please list the following key details: The main topic or question raised in the discussion. Any steps or actions taken by the original author or commenters to address the discussion. Key discussions or points of view shared by participants in the discussion thread. Any solutions identified, consensus reached, or pending tasks if the discussion hasn't been resolved. The role and contribution of the user or commenters in the discussion.",
+            gm.payload
+        );
+
+        let usr_prompt_2 = &format!(
+            "Provide a brief summary highlighting the core topic and emphasize the overarching contribution made by '{target_str}' to the resolution of this discussion, ensuring your response stays under 128 tokens."
+        );
+
+        let discussion_summary = chain_of_chat(
+            sys_prompt_1,
+            usr_prompt_1,
+            "discussion99",
+            256,
+            usr_prompt_2,
+            128,
+            &format!("Error generating discussion summary #{}", gm.source_url),
+        )
+        .await;
+
+        if let Some(summary) = discussion_summary {
+            let out = format!("{} {}", gm.source_url, summary);
+            text_out.push_str(&out);
+            gm.payload = out;
+            if let Some(target) = target_person {
+                gm.name = target.to_string();
+            }
+        } else {
+            log::error!("Error generating discussion summary #{}", gm.source_url);
+        }
+    }
+
+    (text_out, discussions)
 }
 
 pub async fn correlate_commits_issues(
@@ -206,7 +312,7 @@ pub async fn correlate_commits_issues_discussions(
 ) -> Option<String> {
     let total_space = 16000; // 16k tokens
 
-    let total_ratio = 11.0; // 1 + 4 + 4 + 2
+    let _total_ratio = 11.0; // 1 + 4 + 4 + 2
     let profile_ratio = 1.0;
     let commit_ratio = 4.0;
     let issue_ratio = 4.0;
@@ -318,105 +424,4 @@ pub async fn correlate_user_and_home_project(
         "correlate-user-home-summary",
     )
     .await
-}
-
-pub async fn analyze_issue(
-    issue: &Issue,
-    target_person: Option<&str>,
-    all_text: &str,
-) -> Option<(String, GitMemory)> {
-    let issue_creator_name = issue.user.login.to_string();
-    let issue_number = issue.number;
-    let issue_title = issue.title.to_string();
-
-    let issue_date = issue.created_at.date_naive();
-    let issue_url = issue.url.to_string();
-    let target_str = target_person.unwrap_or("key participants");
-
-    let sys_prompt_1 = &format!(
-        "Given the information that user '{issue_creator_name}' opened an issue titled '{issue_title}', your task is to analyze the content of the issue posts. Extract key details including the main problem or question raised, the environment in which the issue occurred, any steps taken by the user and commenters to address the problem, relevant discussions, and any identified solutions, consesus reached, or pending tasks."
-    );
-    let usr_prompt_1 = &format!(
-        "Based on the GitHub issue posts: {all_text}, please list the following key details: The main problem or question raised in the issue. The environment or conditions in which the issue occurred (e.g., hardware, OS). Any steps or actions taken by the user or commenters to address the issue. Key discussions or points of view shared by participants in the issue thread. Any solutions identified, consensus reached, or pending tasks if the issue hasn't been resolved. The role and contribution of the user or commenters in the issue."
-    );
-    let usr_prompt_2 = &format!(
-        "Provide a brief summary highlighting the core problem and emphasize the overarching contribution made by '{target_str}' to the resolution of this issue, ensuring your response stays under 128 tokens."
-    );
-
-    match chain_of_chat(
-        sys_prompt_1,
-        usr_prompt_1,
-        &format!("issue_{issue_number}"),
-        256,
-        usr_prompt_2,
-        128,
-        &format!("Error generatng issue summary #{issue_number}"),
-    )
-    .await
-    {
-        Some(issue_summary) => {
-            let mut out = format!("{issue_url} ");
-            out.push_str(&issue_summary);
-            let name = target_person.unwrap_or(&issue_creator_name).to_string();
-            let gm = GitMemory {
-                memory_type: MemoryType::Issue,
-                name: name,
-                tag_line: issue_title,
-                source_url: issue_url,
-                payload: out.clone(),
-                date: issue_date,
-            };
-
-            Some((out, gm))
-        }
-        None => {
-            log::error!("Error generating issue summary #{issue_number}");
-            None
-        }
-    }
-}
-
-pub async fn analyze_discussions(
-    mut discussions: Vec<GitMemory>,
-    target_person: Option<&str>,
-) -> (String, Vec<GitMemory>) {
-    let target_str = target_person.unwrap_or("key participants");
-    let sys_prompt_1 =
-        "Given the information on a GitHub discussion, your task is to analyze the content of the discussion posts. Extract key details including the main topic or question raised, any steps taken by the original author and commenters to address the problem, relevant discussions, and any identified solutions, consensus reached, or pending tasks.";
-
-    let mut text_out = "".to_string();
-    for gm in discussions.iter_mut() {
-        let usr_prompt_1 = &format!(
-            "Based on the GitHub discussion post: {}, please list the following key details: The main topic or question raised in the discussion. Any steps or actions taken by the original author or commenters to address the discussion. Key discussions or points of view shared by participants in the discussion thread. Any solutions identified, consensus reached, or pending tasks if the discussion hasn't been resolved. The role and contribution of the user or commenters in the discussion.",
-            gm.payload
-        );
-
-        let usr_prompt_2 = &format!(
-            "Provide a brief summary highlighting the core topic and emphasize the overarching contribution made by '{target_str}' to the resolution of this discussion, ensuring your response stays under 128 tokens."
-        );
-
-        let discussion_summary = chain_of_chat(
-            sys_prompt_1,
-            usr_prompt_1,
-            "discussion99",
-            256,
-            usr_prompt_2,
-            128,
-            &format!("Error generating discussion summary #{}", gm.source_url),
-        )
-        .await;
-
-        if let Some(summary) = discussion_summary {
-            let out = format!("{} {}", gm.source_url, summary);
-            text_out.push_str(&out);
-            gm.payload = out;
-            if let Some(target) = target_person {
-                gm.name = target.to_string();
-            }
-        } else {
-            log::error!("Error generating discussion summary #{}", gm.source_url);
-        }
-    }
-
-    (text_out, discussions)
 }
