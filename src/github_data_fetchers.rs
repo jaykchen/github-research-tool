@@ -94,7 +94,75 @@ pub async fn get_issues_in_range(
     let count = issue_vec.len();
     Some((count, issue_vec))
 }
-pub async fn get_issue_texts(issue: Issue) -> Option<String> {
+
+pub async fn get_issue_texts(issue: &Issue) -> Option<String> {
+    let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
+
+    let issue_creator_name = &issue.user.login;
+    let issue_title = &issue.title;
+    let issue_body = match &issue.body {
+        Some(body) => squeeze_fit_remove_quoted(body, "```", 500, 0.6),
+        None => "".to_string(),
+    };
+    let issue_url = &issue.url.to_string();
+
+    let labels = issue.labels
+        .iter()
+        .map(|lab| lab.name.clone())
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    let mut all_text_from_issue = format!(
+        "User '{}', opened an issue titled '{}', labeled '{}', with the following post: '{}'.",
+        issue_creator_name, issue_title, labels, issue_body
+    );
+
+    let mut current_page = 1;
+    loop {
+        let url_str = format!("{}/comments?&page={}", issue_url, current_page);
+
+        match github_http_fetch(&github_token, &url_str).await {
+            Some(res) =>
+                match serde_json::from_slice::<Vec<Comment>>(res.as_slice()) {
+                    Err(_e) => {
+                        log::error!(
+                            "Error parsing Vec<Comment> at page {}: {:?}",
+                            current_page,
+                            _e
+                        );
+                        break;
+                    }
+                    Ok(comments_obj) => {
+                        if comments_obj.is_empty() {
+                            break; // Exit the loop when there are no more comments to process
+                        }
+                        for comment in &comments_obj {
+                            let comment_body = match &comment.body {
+                                Some(body) => squeeze_fit_remove_quoted(body, "```", 500, 0.6),
+                                None => "".to_string(),
+                            };
+                            let commenter = &comment.user.login;
+                            let commenter_input = format!("{} commented: {}", commenter, comment_body);
+                            if all_text_from_issue.len() > 45_000 {
+                                break;
+                            }
+                            all_text_from_issue.push_str(&commenter_input);
+                        }
+                    }
+                }
+            None => {
+                break;
+            }
+        }
+
+        current_page += 1;
+    }
+
+    Some(all_text_from_issue)
+}
+
+
+/* pub async fn get_issue_texts(issue: &Issue) -> Option<String> {
     let github_token = env::var("github_token").unwrap_or("fake-token".to_string());
 
     let issue_creator_name = issue.user.login;
@@ -157,7 +225,7 @@ pub async fn get_issue_texts(issue: Issue) -> Option<String> {
     }
 
     Some(all_text_from_issue)
-}
+} */
 pub async fn get_commits_in_range(
     owner: &str,
     repo: &str,
