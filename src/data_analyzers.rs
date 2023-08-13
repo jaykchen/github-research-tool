@@ -193,6 +193,9 @@ pub async fn correlate_commits_issues_discussions(
     _discussions_summary: Option<&str>,
     target_person: Option<&str>,
 ) -> Option<String> {
+    if _commits_summary.is_none() && _issues_summary.is_none() && _discussions_summary.is_none() {
+        return None;
+    }
     let total_space = 16000; // 16k tokens
 
     let total_ratio = 11.0; // 1 + 4 + 4 + 2
