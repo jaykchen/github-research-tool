@@ -234,7 +234,7 @@ pub async fn github_http_post(token: &str, base_url: &str, query: &str) -> Optio
     }
 }
 
-pub async fn save_user(github_token: &str, owner: &str, repo: &str, user_name: &str) -> bool {
+pub async fn save_user(owner: &str, repo: &str, user_name: &str) -> bool {
     use std::hash::Hasher;
     use twox_hash::XxHash;
     let repo_string = format!("{owner}/{repo}");

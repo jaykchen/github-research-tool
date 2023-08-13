@@ -71,13 +71,19 @@ pub async fn process_issues(
     for issue in &inp_vec {
         match get_issue_texts(github_token, issue).await {
             Some(text) => match analyze_issue(issue, target_person, &text).await {
-                None => log::error!("Error analyzing an issue. {:?}", issue.url.to_string()),
+                None => {
+                    log::error!("Error analyzing issue: {:?}", issue.url.to_string());
+                    continue;
+                }
                 Some((summary, gm)) => {
                     issues_summaries.push_str(&format!("{} {}\n", gm.date, summary));
                     git_memory_vec.push(gm);
                 }
             },
-            None => log::error!("Error fetching issue texts: {:?}", issue.url.to_string()),
+            None => {
+                log::error!("Error getting issue texts: {:?}", issue.url.to_string());
+                continue;
+            }
         }
     }
 
@@ -131,7 +137,7 @@ pub async fn analyze_issue(
                 name: name,
                 tag_line: issue_title,
                 source_url: issue_url,
-                payload: out.clone(),
+                payload: issue_summary,
                 date: issue_date,
             };
 
@@ -224,6 +230,10 @@ pub async fn process_commits(
     }
 
     let count = git_memory_vec.len();
+    if count == 0 {
+        log::error!("No commits processed");
+        return None;
+    }
     Some((commits_summaries, count, git_memory_vec))
 }
 

@@ -86,7 +86,7 @@ async fn handle_weekly_report<B: Bot>(
     client: &Http,
     ac: ApplicationCommandInteraction,
 ) {
-    let wait_minutes_msg = || async {
+    let _wait_minutes_msg = || async {
         _ =  client
             .edit_original_interaction_response(github_token, &serde_json::json!({ "content": "it may take a few minutes to process, please be patient." }))
             .await;
@@ -169,68 +169,82 @@ async fn handle_weekly_report<B: Bot>(
     sleep(tokio::time::Duration::from_secs(2)).await;
 
     _ = edit_original_wrapped(client, &ac.token, &start_msg_str).await;
-    wait_minutes_msg().await;
     let mut commits_summaries = String::new();
-
-    match get_commits_in_range(github_token, &owner, &repo, user_name, n_days).await {
-        Some((count, commits_vec)) => {
-            let commits_str = commits_vec
-                .iter()
-                .map(|com| {
-                    com.source_url
-                        .rsplitn(2, '/')
-                        .nth(0)
-                        .unwrap_or("1234567")
-                        .chars()
-                        .take(7)
-                        .collect::<String>()
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
-            let commits_msg_str = format!("found {count} commits: {commits_str}");
-            report.push_str(&format!("{commits_msg_str}\n"));
-            _ = edit_original_wrapped(client, &ac.token, &commits_msg_str).await;
-
-            if let Some((a, _, commit_vec)) = process_commits(github_token, commits_vec).await {
-                let text = commit_vec
-                    .into_iter()
-                    .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
+    'commits_block: {
+        match get_commits_in_range(github_token, &owner, &repo, user_name, n_days).await {
+            Some((count, commits_vec)) => {
+                let commits_str = commits_vec
+                    .iter()
+                    .map(|com| {
+                        com.source_url
+                            .rsplitn(2, '/')
+                            .nth(0)
+                            .unwrap_or("1234567")
+                            .chars()
+                            .take(7)
+                            .collect::<String>()
+                    })
                     .collect::<Vec<String>>()
-                    .join("");
-                send_message_to_channel("ik8", "ch_rep", text).await;
-                commits_summaries = a;
+                    .join(", ");
+                let commits_msg_str = format!("found {count} commits: {commits_str}");
+                report.push_str(&format!("{commits_msg_str}\n"));
+                _ = edit_original_wrapped(client, &ac.token, &commits_msg_str).await;
+                if count == 0 {
+                    break 'commits_block;
+                }
+                sleep(tokio::time::Duration::from_secs(2)).await;
+                _wait_minutes_msg().await;
+                match process_commits(github_token, commits_vec).await {
+                    Some((a, _, commit_vec)) => {
+                        let text = commit_vec
+                            .into_iter()
+                            .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
+                            .collect::<Vec<String>>()
+                            .join("");
+                        send_message_to_channel("ik8", "ch_rep", text).await;
+                        commits_summaries = a;
+                    }
+                    None => log::error!("processing commits failed"),
+                }
             }
+            None => log::error!("failed to get commits"),
         }
-        None => log::error!("failed to get commits"),
     }
     let mut issues_summaries = String::new();
 
-    match get_issues_in_range(github_token, &owner, &repo, user_name, n_days).await {
-        Some((count, issue_vec)) => {
-            let issues_str = issue_vec
-                .iter()
-                .map(|issue| issue.url.rsplitn(2, '/').nth(0).unwrap_or("1234"))
-                .collect::<Vec<&str>>()
-                .join(", ");
-            let issues_msg_str = format!("found {} issues: {}", count, issues_str);
-            report.push_str(&format!("{issues_msg_str}\n"));
-            _ = edit_original_wrapped(client, &ac.token, &issues_msg_str).await;
-
-            match process_issues(github_token, issue_vec, user_name).await {
-                Some((summary, _, issues_vec)) => {
-                    let text = issues_vec
-                        .into_iter()
-                        .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
-                        .collect::<Vec<String>>()
-                        .join("");
-                    send_message_to_channel("ik8", "ch_iss", text).await;
-
-                    issues_summaries = summary;
+    'issues_block: {
+        match get_issues_in_range(github_token, &owner, &repo, user_name, n_days).await {
+            Some((count, issue_vec)) => {
+                let issues_str = issue_vec
+                    .iter()
+                    .map(|issue| issue.url.rsplitn(2, '/').nth(0).unwrap_or("1234"))
+                    .collect::<Vec<&str>>()
+                    .join(", ");
+                let issues_msg_str = format!("found {} issues: {}", count, issues_str);
+                report.push_str(&format!("{issues_msg_str}\n"));
+                _ = edit_original_wrapped(client, &ac.token, &issues_msg_str).await;
+                if count == 0 {
+                    break 'issues_block;
                 }
-                None => log::error!("failed to process issues"),
+                sleep(tokio::time::Duration::from_secs(2)).await;
+                _wait_minutes_msg().await;
+
+                match process_issues(github_token, issue_vec, user_name).await {
+                    Some((summary, _, issues_vec)) => {
+                        let text = issues_vec
+                            .into_iter()
+                            .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
+                            .collect::<Vec<String>>()
+                            .join("");
+                        send_message_to_channel("ik8", "ch_iss", text).await;
+
+                        issues_summaries = summary;
+                    }
+                    None => log::error!("processing issues failed"),
+                }
             }
+            None => log::error!("failed to get issues"),
         }
-        None => log::error!("failed to get issues"),
     }
 
     let now = Utc::now();
@@ -244,33 +258,41 @@ async fn handle_weekly_report<B: Bot>(
     );
 
     let mut discussion_data = String::new();
-    match search_discussions(github_token, &discussion_query).await {
-        Some((count, discussion_vec)) => {
-            let discussions_str = discussion_vec
-                .iter()
-                .map(|discussion| {
-                    discussion
-                        .source_url
-                        .rsplitn(2, '/')
-                        .nth(0)
-                        .unwrap_or("1234")
-                })
-                .collect::<Vec<&str>>()
-                .join(", ");
-            let discussions_msg_str = format!("found {} discussions: {}", count, discussions_str);
-            report.push_str(&format!("{discussions_msg_str}\n"));
-            _ = edit_original_wrapped(client, &ac.token, &discussions_msg_str).await;
+    'discussion_block: {
+        match search_discussions(github_token, &discussion_query).await {
+            Some((count, discussion_vec)) => {
+                let discussions_str = discussion_vec
+                    .iter()
+                    .map(|discussion| {
+                        discussion
+                            .source_url
+                            .rsplitn(2, '/')
+                            .nth(0)
+                            .unwrap_or("1234")
+                    })
+                    .collect::<Vec<&str>>()
+                    .join(", ");
+                let discussions_msg_str =
+                    format!("found {} discussions: {}", count, discussions_str);
+                report.push_str(&format!("{discussions_msg_str}\n"));
+                _ = edit_original_wrapped(client, &ac.token, &discussions_msg_str).await;
+                if count == 0 {
+                    break 'discussion_block;
+                }
+                sleep(tokio::time::Duration::from_secs(2)).await;
+                _wait_minutes_msg().await;
 
-            let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
-            discussion_data = a;
-            let text = discussions_vec
-                .into_iter()
-                .map(|dis| format!("\n{}: {}\n", dis.source_url, dis.payload))
-                .collect::<Vec<String>>()
-                .join("");
-            send_message_to_channel("ik8", "ch_dis", text).await;
+                let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
+                discussion_data = a;
+                let text = discussions_vec
+                    .into_iter()
+                    .map(|dis| format!("\n{}: {}\n", dis.source_url, dis.payload))
+                    .collect::<Vec<String>>()
+                    .join("");
+                send_message_to_channel("ik8", "ch_dis", text).await;
+            }
+            None => log::error!("failed to get discussions"),
         }
-        None => log::error!("failed to get discussions"),
     }
 
     if commits_summaries.is_empty() && issues_summaries.is_empty() && discussion_data.is_empty() {

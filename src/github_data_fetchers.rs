@@ -457,7 +457,7 @@ pub async fn get_issue_texts(github_token: &str, issue: &Issue) -> Option<String
                 }
                 Ok(comments_obj) => {
                     if comments_obj.is_empty() {
-                        break; // Exit the loop when there are no more comments to process
+                        continue;
                     }
                     for comment in &comments_obj {
                         let comment_body = match &comment.body {
