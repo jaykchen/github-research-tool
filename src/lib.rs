@@ -119,7 +119,6 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         Some(gm) => {
             _profile_data = format!("About {}/{}: {}", owner, repo, gm.payload);
             send_message_to_channel("ik8", "ch_pro", _profile_data.to_string()).await;
-
         }
     }
 
@@ -259,30 +258,35 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         None => log::error!("failed to get discussions"),
     }
 
-    match correlate_commits_issues_discussions(
-        Some(&_profile_data),
-        Some(&commits_summaries),
-        Some(&issues_summaries),
-        Some(&discussion_data),
-        user_name,
-    )
-    .await
-    {
-        None => match user_name {
+    if commits_summaries.is_empty() && issues_summaries.is_empty() && discussion_data.is_empty() {
+        match user_name {
             Some(target_person) => {
                 report = format!(
-            "No useful data found for {target_person}, you may try `/search` to find out more about {target_person}"
-        );
+        "No useful data found for {target_person}, you may try `/search` to find out more about {target_person}"
+    );
             }
 
             None => {
                 report = "No useful data found, nothing to report".to_string();
             }
-        },
-        Some(final_summary) => {
-            report.push_str(&final_summary);
+        }
+    } else {
+        match correlate_commits_issues_discussions(
+            Some(&_profile_data),
+            Some(&commits_summaries),
+            Some(&issues_summaries),
+            Some(&discussion_data),
+            user_name,
+        )
+        .await
+        {
+            None => {}
+            Some(final_summary) => {
+                report.push_str(&final_summary);
+            }
         }
     }
+
     let _ = edit_original_wrapped(client, &ac.token, &report).await;
 }
 
