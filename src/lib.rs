@@ -107,10 +107,10 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         _ => panic!("Expected string for repo"),
     };
 
-    let mut _profile_data = None;
+    let mut _profile_data = String::new();
     match is_valid_owner_repo(owner, repo).await {
         None => {
-            sleep(tokio::time::Duration::from_secs(1)).await;
+            sleep(tokio::time::Duration::from_secs(2)).await;
             let _ = send_discord_msg(
                 client,
                 &ac.token,
@@ -119,7 +119,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
             return;
         }
         Some(gm) => {
-            _profile_data = Some(gm.payload);
+            _profile_data = format!("About {}/{}: {}", owner, repo, gm.payload);
         }
     }
 
@@ -135,7 +135,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     match user_name {
         Some(user_name) => {
             if !is_code_contributor(owner, repo, &user_name).await {
-                sleep(tokio::time::Duration::from_secs(1)).await;
+                sleep(tokio::time::Duration::from_secs(2)).await;
                 let content = format!(
                     "{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions."
                 );
@@ -157,7 +157,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
     let start_msg_str = format!(
         "exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project"
     );
-    sleep(tokio::time::Duration::from_secs(1)).await;
+    sleep(tokio::time::Duration::from_secs(2)).await;
 
     let _ = send_discord_msg(client, &ac.token, &start_msg_str).await;
 
@@ -179,7 +179,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<String>>()
                 .join(", ");
             let commits_msg_str = format!("found {count} commits: {commits_str}");
-            report.push_str(commits_msg_str.as_str());
+            report.push_str(&format!("{commits_msg_str}\n"));
             let _ = send_discord_msg(client, &ac.token, &commits_msg_str).await;
 
             if let Some((a, _, commit_vec)) = process_commits(commits_vec).await {
@@ -204,7 +204,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<&str>>()
                 .join(", ");
             let issues_msg_str = format!("found {} issues: {}", count, issues_str);
-            report.push_str(issues_msg_str.as_str());
+            report.push_str(&format!("{issues_msg_str}\n"));
             let _ = send_discord_msg(client, &ac.token, &issues_msg_str).await;
 
             if let Some((summary, _, issues_vec)) = process_issues(issue_vec, user_name).await {
@@ -227,7 +227,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
 
     let discussion_query = format!("involves:{} updated:>{}", user_name.unwrap(), a_week_ago_str);
 
-    let mut discussion_data = String::new();
+    let mut discussion_data = _profile_data;
     match search_discussions(&discussion_query).await {
         Some((count, discussion_vec)) => {
             let discussions_str = discussion_vec
@@ -238,10 +238,10 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<&str>>()
                 .join(", ");
             let discussions_msg_str = format!("found {} discussions: {}", count, discussions_str);
-            report.push_str(discussions_msg_str.as_str());
+            report.push_str(&format!("{discussions_msg_str}\n"));
             let _ = send_discord_msg(client, &ac.token, &discussions_msg_str).await;
 
-            let (a,discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
+            let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
 
             let text = discussions_vec
                 .into_iter()
@@ -249,9 +249,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
                 .collect::<Vec<String>>()
                 .join("");
             send_message_to_channel("ik8", "ch_dis", text).await;
-            discussion_data = a;
-
-
+            discussion_data.push_str(&a);
         }
         None => log::error!("failed to get discussions"),
     }
@@ -262,7 +260,7 @@ async fn handle_weekly_report<B: Bot>(_bot: &B, client: &Http, ac: ApplicationCo
         Some(&discussion_data),
         user_name
     ).await.unwrap_or("Failed to generate report.".to_string());
-    report.push_str(resp_content.as_str());
+    report.push_str(&resp_content);
     let _ = send_discord_msg(client, &ac.token, &report).await;
 }
 

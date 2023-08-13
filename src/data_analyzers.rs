@@ -186,6 +186,21 @@ pub async fn correlate_commits_issues_discussions(
     _discussions_summary: Option<&str>,
     target_person: Option<&str>
 ) -> Option<String> {
+    if _commits_summary.is_none() && _issues_summary.is_none() && _discussions_summary.is_none() {
+        match target_person {
+            Some(person) => {
+                return Some(
+                    format!(
+                        "No useful data found for {person}, you may try `/search` to find out more about {person}"
+                    )
+                );
+            }
+
+            None => {
+                return Some("No useful data found, nothing to report".to_string());
+            }
+        }
+    }
     let total_space = 16000; // 16k tokens
     let num_present_data = [_commits_summary, _issues_summary, _discussions_summary]
         .iter()
