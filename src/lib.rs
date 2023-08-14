@@ -192,8 +192,8 @@ async fn handle_weekly_report<B: Bot>(
                 if count == 0 {
                     break 'commits_block;
                 }
-                sleep(tokio::time::Duration::from_secs(2)).await;
-                _wait_minutes_msg().await;
+                // sleep(tokio::time::Duration::from_secs(2)).await;
+                // _wait_minutes_msg().await;
                 match process_commits(github_token, commits_vec).await {
                     Some((a, _, commit_vec)) => {
                         let text = commit_vec
@@ -226,8 +226,8 @@ async fn handle_weekly_report<B: Bot>(
                 if count == 0 {
                     break 'issues_block;
                 }
-                sleep(tokio::time::Duration::from_secs(2)).await;
-                _wait_minutes_msg().await;
+                // sleep(tokio::time::Duration::from_secs(2)).await;
+                // _wait_minutes_msg().await;
 
                 match process_issues(github_token, issue_vec, user_name).await {
                     Some((summary, _, issues_vec)) => {
@@ -279,8 +279,8 @@ async fn handle_weekly_report<B: Bot>(
                 if count == 0 {
                     break 'discussion_block;
                 }
-                sleep(tokio::time::Duration::from_secs(2)).await;
-                _wait_minutes_msg().await;
+                // sleep(tokio::time::Duration::from_secs(2)).await;
+                // _wait_minutes_msg().await;
 
                 let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
                 discussion_data = a;
