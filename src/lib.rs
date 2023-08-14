@@ -18,7 +18,6 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
-use slack_flows::send_message_to_channel;
 use std::env;
 use tokio::time::sleep;
 
@@ -131,7 +130,6 @@ async fn handle_weekly_report<B: Bot>(
         }
         Some(gm) => {
             _profile_data = format!("About {}/{}: {}", owner, repo, gm.payload);
-            send_message_to_channel("ik8", "ch_pro", _profile_data.to_string()).await;
         }
     }
 
@@ -196,12 +194,6 @@ async fn handle_weekly_report<B: Bot>(
                 // _wait_minutes_msg().await;
                 match process_commits(github_token, commits_vec).await {
                     Some((a, _, commit_vec)) => {
-                        let text = commit_vec
-                            .into_iter()
-                            .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
-                            .collect::<Vec<String>>()
-                            .join("");
-                        send_message_to_channel("ik8", "ch_rep", text).await;
                         commits_summaries = a;
                     }
                     None => log::error!("processing commits failed"),
@@ -231,13 +223,6 @@ async fn handle_weekly_report<B: Bot>(
 
                 match process_issues(github_token, issue_vec, user_name).await {
                     Some((summary, _, issues_vec)) => {
-                        let text = issues_vec
-                            .into_iter()
-                            .map(|commit| format!("\n{}: {}\n", commit.source_url, commit.payload))
-                            .collect::<Vec<String>>()
-                            .join("");
-                        send_message_to_channel("ik8", "ch_iss", text).await;
-
                         issues_summaries = summary;
                     }
                     None => log::error!("processing issues failed"),
@@ -284,12 +269,6 @@ async fn handle_weekly_report<B: Bot>(
 
                 let (a, discussions_vec) = analyze_discussions(discussion_vec, user_name).await;
                 discussion_data = a;
-                let text = discussions_vec
-                    .into_iter()
-                    .map(|dis| format!("\n{}: {}\n", dis.source_url, dis.payload))
-                    .collect::<Vec<String>>()
-                    .join("");
-                send_message_to_channel("ik8", "ch_dis", text).await;
             }
             None => log::error!("failed to get discussions"),
         }
@@ -328,4 +307,3 @@ async fn handle_weekly_report<B: Bot>(
 
     _ = edit_original_wrapped(client, &ac.token, &report).await;
 }
-

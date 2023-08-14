@@ -78,6 +78,9 @@ pub async fn process_issues(
                 Some((summary, gm)) => {
                     issues_summaries.push_str(&format!("{} {}\n", gm.date, summary));
                     git_memory_vec.push(gm);
+                    if git_memory_vec.len() > 16 {
+                        break;
+                    }
                 }
             },
             None => {
@@ -218,6 +221,9 @@ pub async fn process_commits(
                 }
 
                 git_memory_vec.push(commit_obj);
+                if git_memory_vec.len() > 20 {
+                    break;
+                }
             }
             None => {
                 log::error!(
