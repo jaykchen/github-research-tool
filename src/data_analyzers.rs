@@ -164,6 +164,30 @@ pub async fn analyze_commit(
         Some(res) => {
             let text = String::from_utf8_lossy(res.as_slice()).to_string();
 
+            let mut clean_text = String::with_capacity(text.len());
+            let mut inside_diff_block = false;
+            
+            for line in text.lines() {
+                if line.starts_with("diff --git") {
+                    inside_diff_block = true;
+                    clean_text.push_str(line);
+                    clean_text.push('\n');
+                    continue;
+                }
+            
+                if inside_diff_block {
+                    if line.chars().any(|ch| ch == '[' || ch == ']' || ch == '{' || ch == '}') {
+                        continue;
+                    }
+                }
+            
+                clean_text.push_str(line);
+                clean_text.push('\n');
+            
+                if line.is_empty() {
+                    inside_diff_block = false;
+                }
+            }
             let sys_prompt_1 = &format!(
                 "You are provided with a commit patch by the user {user_name}. Your task is to parse this data, focusing on the following sections: the Date Line, Subject Line, Diff Files, Diff Changes, Sign-off Line, and the File Changes Summary. Extract key elements of the commit, and the types of files affected, prioritizing code files, scripts, then documentation. Be particularly careful to distinguish between changes made to core code files and modifications made to documentation files, even if they contain technical content. Compile a list of the extracted key elements."
             );
