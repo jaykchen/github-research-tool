@@ -167,7 +167,15 @@ pub async fn analyze_commit(
             let mut clean_text = String::with_capacity(text.len());
             let mut inside_diff_block = false;
             
+            let max_length = 18_000;
+
             for line in text.lines() {
+                if clean_text.len() + line.len() > max_length {
+                    let remaining = max_length - clean_text.len();
+                    clean_text.push_str(&line.chars().take(remaining).collect::<String>());
+                    break;
+                }
+            
                 if line.starts_with("diff --git") {
                     inside_diff_block = true;
                     clean_text.push_str(line);
@@ -193,7 +201,7 @@ pub async fn analyze_commit(
             );
 
             let usr_prompt_1 = &format!(
-                "Based on the provided commit patch: {text}, and description: {tag_line}, extract and present the following key elements: a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item."
+                "Based on the provided commit patch: {clean_text}, and description: {tag_line}, extract and present the following key elements: a high-level summary of the changes made, and the types of files affected. Prioritize data on changes to code files first, then scripts, and lastly documentation. Pay attention to the file types and ensure the distinction between documentation changes and core code changes, even when the documentation contains highly technical language. Please compile your findings into a list, with each key element represented as a separate item."
             );
 
             let usr_prompt_2 = &format!(
