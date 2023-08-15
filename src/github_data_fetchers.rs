@@ -1,3 +1,4 @@
+use crate::data_analyzers::analyze_issue;
 use crate::octocrab_compat::{Comment, Issue, Repository, User};
 use crate::utils::*;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -1512,3 +1513,5 @@ pub async fn search_users(github_token: &str, search_query: &str) -> Option<Stri
 
     Some(out)
 }
+
+

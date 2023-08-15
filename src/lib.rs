@@ -4,6 +4,7 @@ pub mod github_data_fetchers;
 pub mod octocrab_compat;
 pub mod reports;
 pub mod utils;
+pub mod integrated_processors;
 use chrono::{Duration, Utc};
 use data_analyzers::*;
 use discord_flows::{
