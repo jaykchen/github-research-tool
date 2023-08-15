@@ -2,12 +2,13 @@ use http_req::{request::Method, request::Request, response, uri::Uri};
 use log;
 use openai_flows::{
     chat::{ChatModel, ChatOptions},
+    embeddings::*,
     OpenAIFlows,
 };
 use serde_json::Value;
 use std::collections::HashSet;
 use store_flows::{get, set};
-
+use vector_store_flows::*;
 /*
 use crypto::{symmetriccipher, buffer, aes, blockmodes};
 use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
@@ -36,6 +37,38 @@ fn get_vals(hex_key: &str) -> (String, String) {
 
 
  */
+
+pub async fn get_embeddings(payload: &str) -> Option<Vec<f64>> {
+    let  openai = OpenAIFlows::new();
+
+    let input = EmbeddingsInput::String(payload.to_string());
+    match openai.create_embeddings(input).await {
+        Ok(v) => Some(v[0]),
+        Err(_e) => {
+            log::error!("Error getting embeddings: {:?}", _e);
+            None
+        }
+    }
+}
+
+pub async fn init_store(collection_name: &str) {
+    let p = CollectionCreateParams { vector_size: 4 };
+    if let Err(_) = create_collection(collection_name, &p).await {
+        return;
+    }
+    match collection_info(collection_name).await {
+        Ok(ci) => {
+            log::debug!(
+                "There are {} vectors in collection `{}` just when created",
+                ci.points_count,
+                collection_name
+            );
+        }
+        Err(_) => {
+            return;
+        }
+    }
+}
 
 pub fn squeeze_fit_commits_issues(commits: &str, issues: &str, split: f32) -> (String, String) {
     let mut commits_vec = commits.split_whitespace().collect::<Vec<&str>>();

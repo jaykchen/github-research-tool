@@ -4,6 +4,10 @@ use crate::utils::*;
 use chrono::{DateTime, Utc};
 use log;
 use serde::Deserialize;
+use serde_json::{json, Value, Map};
+use vector_store_flows::*;
+
+static COLLECTION_NAME: &str = "git_memories";
 
 pub async fn is_valid_owner_repo(github_token: &str, owner: &str, repo: &str) -> Option<GitMemory> {
     #[derive(Deserialize)]
@@ -140,6 +144,24 @@ pub async fn analyze_issue(
                 payload: issue_summary,
                 date: issue_date,
             };
+            let key = String::from("text");
+            let mut payload: Map<String, Value> = Map::new();
+            payload.insert(key, Value::String(issue_summary.to_string()));
+            match get_embeddings(&issue_summary).await {
+                Some(em) => {
+                    let p = Point {
+                        id: PointId::Num(1),
+                        vector: em,
+                        payload: Some(payload),
+                    };
+
+                    match upsert_points(COLLECTION_NAME, vec![p]).await {
+                        Ok(_) => {}
+                        Err(_e) => log::error!("Error upserting point for issue #{issue_number}"),
+                    }
+                }
+                None => {}
+            }
 
             Some((out, gm))
         }
