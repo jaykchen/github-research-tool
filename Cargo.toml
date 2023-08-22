@@ -25,3 +25,4 @@ base64 = "0.21.2"
 twox-hash = "1.6.3"
 derivative = "2.2.0"
 chrono = { version = "0.4.26", features = ["serde"] }
+tiktoken-rs = "0.5.1"
