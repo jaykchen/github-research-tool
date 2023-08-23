@@ -162,9 +162,8 @@ async fn handle_weekly_report<B: Bot>(
                     .join("\n");
 
                 msg_content = format!("found {count} commits:\n{commits_str}");
-                _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
-                report.push(msg_content);
+                report.push(msg_content.clone());
 
                 if count == 0 {
                     break 'commits_block;
@@ -179,6 +178,7 @@ async fn handle_weekly_report<B: Bot>(
             None => log::error!("failed to get commits"),
         }
     }
+    _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
     let mut issues_summaries = String::new();
 
@@ -192,9 +192,8 @@ async fn handle_weekly_report<B: Bot>(
                     .join("\n");
 
                 msg_content = format!("found {count} issues:\n{issues_str}");
-                _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
-                report.push(msg_content);
+                report.push(msg_content.clone());
 
                 if count == 0 {
                     break 'issues_block;
@@ -210,6 +209,7 @@ async fn handle_weekly_report<B: Bot>(
             None => log::error!("failed to get issues"),
         }
     }
+    _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
     let n_plus_30_days_ago_str = (Utc::now() - Duration::days(n_days as i64 + 30))
         .format("%Y-%m-%dT%H:%M:%SZ")
@@ -234,14 +234,14 @@ async fn handle_weekly_report<B: Bot>(
 
             msg_content =
                 format!("{count} discussions were referenced in analysis:\n {discussions_str}");
-            _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
-            report.push(msg_content);
+            report.push(msg_content.clone());
 
             discussion_data = summary;
         }
         None => log::error!("failed to get discussions"),
     }
 
+    _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
     if commits_summaries.is_empty() && issues_summaries.is_empty() && discussion_data.is_empty() {
         report = report_placeholder;
     } else {
