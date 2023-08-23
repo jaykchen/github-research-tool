@@ -104,7 +104,6 @@ async fn handle_weekly_report<B: Bot>(
     let mut _profile_data = String::new();
     match is_valid_owner_repo_integrated(github_token, owner, repo).await {
         None => {
-            sleep(tokio::time::Duration::from_secs(2)).await;
             _ = edit_original_wrapped(
                 client,
                 &ac.token,
@@ -120,53 +119,37 @@ async fn handle_weekly_report<B: Bot>(
 
     let user_name = options.get(2).and_then(|opt| {
         opt.resolved.as_ref().and_then(|val| match val {
-            CommandDataOptionValue::String(s) => Some(s.as_str().to_string()),
+            CommandDataOptionValue::String(s) => Some(s.to_string()),
             _ => None,
         })
     });
 
-    match &user_name {
-        Some(user_name) => {
-            if !is_code_contributor(github_token, owner, repo, &user_name).await {
-                // sleep(tokio::time::Duration::from_secs(2)).await;
-                let   content = format!(
-                    "{} hasn't contributed code to {owner}/{repo}. Bot will try to find out {}'s other contributions.", user_name, user_name
-                );
-                _ = edit_original_wrapped(client, &ac.token, &content).await;
+    let mut msg_content = String::new();
+    let mut addressee_str = String::from("key community participants'");
+    let mut report_placeholder = vec!["No useful data found, nothing to report".to_string()];
+
+    'user_name_check_block: {
+        match &user_name {
+            Some(user_name) => {
+                if is_code_contributor(github_token, owner, repo, &user_name).await {
+                    break 'user_name_check_block;
+                };
+                msg_content = format!("{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions.");
+                addressee_str = format!("{user_name}'s");
+                report_placeholder=    vec![format!("No useful data found for {user_name}, you may try `/search` to find out more about {user_name}" )];
             }
-        }
-        None => {
-            let    content = format!(
+            None => msg_content = format!(
                 "You didn't input a user's name. Bot will then create a report on the weekly progress of {owner}/{repo}."
-            );
-            _ = edit_original_wrapped(client, &ac.token, &content).await;
-        }
-    };
-
-    match is_valid_owner_repo_integrated(&github_token, &owner, &repo).await {
-        None => {
-            _ = edit_original_wrapped(
-                client,
-                &ac.token,
-                "You've entered invalid owner/repo, or the target is private. Please try again.",
-            )
-            .await;
-
-            return;
-        }
-        Some(gm) => {
-            _profile_data = format!("About {}/{}: {}", owner, repo, gm.payload);
-        }
+            ),
+        };
     }
-    let addressee_str = match &user_name {
-        Some(n) => format!("{n}'s"),
-        None => String::from("key community participants'"),
-    };
-    let start_msg_str =
+    _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
+
+    msg_content =
         format!("exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project");
     sleep(tokio::time::Duration::from_secs(2)).await;
 
-    _ = edit_original_wrapped(client, &ac.token, &start_msg_str).await;
+    _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
     let mut commits_summaries = String::new();
     'commits_block: {
@@ -178,11 +161,10 @@ async fn handle_weekly_report<B: Bot>(
                     .collect::<Vec<String>>()
                     .join("\n");
 
-                let commits_msg_str = format!("found {count} commits:\n{commits_str}");
+                msg_content = format!("found {count} commits:\n{commits_str}");
+                _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
 
-                _ = edit_original_wrapped(client, &ac.token, &commits_msg_str).await;
-
-                report.push(commits_msg_str);
+                report.push(msg_content);
 
                 if count == 0 {
                     break 'commits_block;
@@ -197,6 +179,7 @@ async fn handle_weekly_report<B: Bot>(
             None => log::error!("failed to get commits"),
         }
     }
+
     let mut issues_summaries = String::new();
 
     'issues_block: {
@@ -208,9 +191,10 @@ async fn handle_weekly_report<B: Bot>(
                     .collect::<Vec<String>>()
                     .join("\n");
 
-                let issues_msg_str = format!("found {count} issues:\n{issues_str}");
-                _ = edit_original_wrapped(client, &ac.token, &issues_msg_str).await;
-                report.push(issues_msg_str);
+                msg_content = format!("found {count} issues:\n{issues_str}");
+                _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
+
+                report.push(msg_content);
 
                 if count == 0 {
                     break 'issues_block;
@@ -227,7 +211,9 @@ async fn handle_weekly_report<B: Bot>(
         }
     }
 
-    let n_plus_30_days_ago_str = (Utc::now() - Duration::days(n_days as i64 + 30)).format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let n_plus_30_days_ago_str = (Utc::now() - Duration::days(n_days as i64 + 30))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
 
     let discussion_query = match &user_name {
         Some(user_name) => {
@@ -246,10 +232,10 @@ async fn handle_weekly_report<B: Bot>(
                 .collect::<Vec<String>>()
                 .join("\n");
 
-            let discussions_msg_str =
+            msg_content =
                 format!("{count} discussions were referenced in analysis:\n {discussions_str}");
-            _ = edit_original_wrapped(client, &ac.token, &discussions_msg_str).await;
-            report.push(discussions_msg_str);
+            _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
+            report.push(msg_content);
 
             discussion_data = summary;
         }
@@ -257,18 +243,7 @@ async fn handle_weekly_report<B: Bot>(
     }
 
     if commits_summaries.is_empty() && issues_summaries.is_empty() && discussion_data.is_empty() {
-        match &user_name {
-            Some(target_person) => {
-                report = vec![format!(
-                    "No useful data found for {}, you may try `/search` to find out more about {}",
-                    target_person, target_person
-                )];
-            }
-
-            None => {
-                report = vec!["No useful data found, nothing to report".to_string()];
-            }
-        }
+        report = report_placeholder;
     } else {
         match correlate_commits_issues_discussions(
             Some(&_profile_data),

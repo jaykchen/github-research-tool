@@ -1309,7 +1309,11 @@ pub async fn search_discussions_integrated(
                             let date = discussion.created_at.date_naive();
                             let title = discussion.title.as_ref().unwrap_or(&empty_str).to_string();
                             let url = discussion.url.as_ref().unwrap_or(&empty_str).to_string();
-                            let source_url = discussion.html_url.as_ref().unwrap_or(&empty_str).to_string();
+                            let source_url = discussion
+                                .html_url
+                                .as_ref()
+                                .unwrap_or(&empty_str)
+                                .to_string();
                             let author_login = discussion
                                 .author
                                 .as_ref()
