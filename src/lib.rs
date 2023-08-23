@@ -7,10 +7,9 @@ pub mod utils;
 use chrono::{Duration, Utc};
 use data_analyzers::*;
 use discord_flows::{
-    application_command_handler,
-    message_handler,
+    application_command_handler, message_handler,
     model::{
-        application::interaction::InteractionResponseType,
+        // application::interaction::InteractionResponseType,
         application_command::CommandDataOptionValue,
         prelude::application::interaction::application_command::ApplicationCommandInteraction,
         Message,
@@ -21,10 +20,9 @@ use discord_functions::*;
 use dotenv::dotenv;
 use flowsnet_platform_sdk::logger;
 use github_data_fetchers::*;
+use serde_json::json;
 use std::{env, vec};
 use tokio::time::sleep;
-use serde_json::json;
-
 
 #[no_mangle]
 #[tokio::main(flavor = "current_thread")]
@@ -52,13 +50,13 @@ pub async fn on_deploy() {
 }
 
 #[message_handler]
-async fn handle(msg: Message) {
+async fn handle(msg: Message) -> Result<(), ()> {
     let discord_token = env::var("discord_token").unwrap();
     let bot = ProvidedBot::new(&discord_token);
     let client = bot.get_client();
 
     if msg.author.bot {
-        return Err("Some appropriate error message or type here".into());
+        std::process::exit(0);
     }
 
     _ = client
@@ -69,6 +67,8 @@ async fn handle(msg: Message) {
             }),
         )
         .await;
+
+    Ok(())
 }
 
 #[application_command_handler]
@@ -123,19 +123,12 @@ async fn handler(ac: ApplicationCommandInteraction) {
             let mut _profile_data = String::new();
             match is_valid_owner_repo_integrated(&github_token, owner, repo).await {
                 None => {
-                    match client
+                    _ = client
                     .edit_original_interaction_response(&ac.token, &(json!({ "content": "You've entered invalid owner/repo, or the target is private. Please try again." })))
-                    .await
-                {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        log::error!("error sending message: {:?}", e);
-                        Err(e)
-                    }
-                }
+                    .await;
 
-                return Err("Some appropriate error message or type here".into());
-            }
+                    std::process::exit(0);
+                }
                 Some(gm) => {
                     _profile_data = format!("About {}/{}: {}", owner, repo, gm.payload);
                 }
@@ -167,30 +160,21 @@ async fn handler(ac: ApplicationCommandInteraction) {
                         };
             }
             if !msg_content.is_empty() {
-                match client
-                .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
-                .await
-                {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        log::error!("error sending message: {:?}", e);
-                        Err(e)
-                    }
-                }            }
+                _ = client
+                    .edit_original_interaction_response(
+                        &ac.token,
+                        &(json!({"content": msg_content})),
+                    )
+                    .await;
+            }
             msg_content = format!(
                 "exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project"
             );
             sleep(tokio::time::Duration::from_secs(2)).await;
-            match client
-            .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
-            .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    log::error!("error sending message: {:?}", e);
-                    Err(e)
-                }
-            }
+            _ = client
+                .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
+                .await;
+
             let mut commits_summaries = String::new();
             'commits_block: {
                 match get_commits_in_range(&github_token, &owner, &repo, user_name.clone(), n_days)
@@ -206,6 +190,12 @@ async fn handler(ac: ApplicationCommandInteraction) {
                         msg_content = format!("found {count} commits:\n{commits_str}");
 
                         report.push(msg_content.clone());
+                        _ = client
+                            .edit_original_interaction_response(
+                                &ac.token,
+                                &(json!({"content": msg_content})),
+                            )
+                            .await;
 
                         if count == 0 {
                             break 'commits_block;
@@ -220,16 +210,7 @@ async fn handler(ac: ApplicationCommandInteraction) {
                     None => log::error!("failed to get commits"),
                 }
             }
-            match client
-                .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    log::error!("error sending message: {:?}", e);
-                    Err(e)
-                }
-            }
+
             let mut issues_summaries = String::new();
             'issues_block: {
                 match get_issues_in_range(&github_token, &owner, &repo, user_name.clone(), n_days)
@@ -245,6 +226,9 @@ async fn handler(ac: ApplicationCommandInteraction) {
                         msg_content = format!("found {count} issues:\n{issues_str}");
 
                         report.push(msg_content.clone());
+            _ = client
+                .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
+                .await;
 
                         if count == 0 {
                             break 'issues_block;
@@ -260,16 +244,7 @@ async fn handler(ac: ApplicationCommandInteraction) {
                     None => log::error!("failed to get issues"),
                 }
             }
-            match client
-                .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    log::error!("error sending message: {:?}", e);
-                    Err(e)
-                }
-            }
+
             let n_plus_30_days_ago_str = (Utc::now() - Duration::days(n_days as i64 + 30))
                 .format("%Y-%m-%dT%H:%M:%SZ")
                 .to_string();
@@ -299,16 +274,10 @@ async fn handler(ac: ApplicationCommandInteraction) {
                 }
                 None => log::error!("failed to get discussions"),
             }
-            match client
+            _ = client
                 .edit_original_interaction_response(&ac.token, &(json!({"content": msg_content})))
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    log::error!("error sending message: {:?}", e);
-                    Err(e)
-                }
-            }
+                .await;
+
             if commits_summaries.is_empty()
                 && issues_summaries.is_empty()
                 && discussion_data.is_empty()
@@ -332,19 +301,12 @@ async fn handler(ac: ApplicationCommandInteraction) {
                     }
                 }
             }
-            match client
+            _ = client
                 .edit_original_interaction_response(
                     &ac.token,
                     &(json!({"content": report.join("\n")})),
                 )
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    log::error!("error sending message: {:?}", e);
-                    Err(e)
-                }
-            }
+                .await;
         }
 
         "search" => {
@@ -352,5 +314,4 @@ async fn handler(ac: ApplicationCommandInteraction) {
         }
         _ => {}
     }
-    Ok(())
 }

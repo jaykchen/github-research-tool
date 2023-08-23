@@ -1359,8 +1359,8 @@ pub async fn search_discussions_integrated(
                                     }
                                 }
                             }
-                            let discussion_texts =
-                                squeeze_fit_remove_quoted(&disuccsion_texts, "```", 9000, 0.4);
+                            let disuccsion_texts =
+                                squeeze_fit_post_texts(&disuccsion_texts, 12_000, 0.4);
                             let target_str = match &target_person {
                                 Some(person) => format!("{}'s", person),
                                 None => "key participants'".to_string(),

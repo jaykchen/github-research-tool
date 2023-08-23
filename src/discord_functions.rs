@@ -4,8 +4,8 @@ use serde_json;
 use std::env;
 
 pub async fn register_commands(discord_token: &str) -> bool {
-    let bot_id = env::var("bot_id").unwrap_or("1124137839601406013".to_string());
-    let guild_id = env::var("discord_server").unwrap_or("1128056245765558364".to_string());
+    let bot_id = env::var("bot_id").unwrap_or("1143678250661466124".to_string());
+    let guild_id = env::var("discord_server").unwrap_or("1091003237827608647".to_string());
 
     let command_weekly_report = serde_json::json!({
         "name": "weekly_report",
@@ -33,8 +33,8 @@ pub async fn register_commands(discord_token: &str) -> bool {
         ]
     });
 
-    let guild_id = guild_id.parse::<u64>().unwrap_or(1128056245765558364);
-    let commands = serde_json::json!([command_weekly_report,]);
+    let guild_id = guild_id.parse::<u64>().unwrap_or(1091003237827608647);
+    let commands = serde_json::json!([command_weekly_report]);
     let http_client = HttpBuilder::new(discord_token)
         .application_id(bot_id.parse().unwrap())
         .build();
