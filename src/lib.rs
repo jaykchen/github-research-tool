@@ -131,19 +131,22 @@ async fn handle_weekly_report<B: Bot>(
     'user_name_check_block: {
         match &user_name {
             Some(user_name) => {
-                if is_code_contributor(github_token, owner, repo, &user_name).await {
+                addressee_str = format!("{user_name}'s");
+                report_placeholder=    vec![format!("No useful data found for {user_name}, you may try `/search` to find out more about {user_name}" )];     
+                           if is_code_contributor(github_token, owner, repo, &user_name).await {
                     break 'user_name_check_block;
                 };
                 msg_content = format!("{user_name} hasn't contributed code to {owner}/{repo}. Bot will try to find out {user_name}'s other contributions.");
-                addressee_str = format!("{user_name}'s");
-                report_placeholder=    vec![format!("No useful data found for {user_name}, you may try `/search` to find out more about {user_name}" )];
+
             }
             None => msg_content = format!(
                 "You didn't input a user's name. Bot will then create a report on the weekly progress of {owner}/{repo}."
             ),
         };
     }
+    if !msg_content.is_empty() {
     _ = edit_original_wrapped(client, &ac.token, &msg_content).await;
+    }
 
     msg_content =
         format!("exploring {addressee_str} GitHub contributions to `{owner}/{repo}` project");
